@@ -33,7 +33,7 @@ async function utilization(from, to, unitId) {
   const p = [from, to];
   const rows = await db.q(`SELECT r.id, r.code, r.name, b.name building, c.name category, u.name unit, r.capacity,
       count(e.id) events,
-      COALESCE(round(sum(extract(epoch FROM (LEAST(e.end_at, $2::date::timestamptz) - GREATEST(e.start_at, $1::date::timestamptz))))/3600.0, 1), 0) hours,
+      COALESCE(round((sum(extract(epoch FROM (LEAST(e.end_at, $2::date::timestamptz) - GREATEST(e.start_at, $1::date::timestamptz))))/3600.0)::numeric, 1), 0) hours,
       count(e.id) FILTER (WHERE e.event_type='kuliah') lectures
     FROM rooms r JOIN buildings b ON b.id=r.building_id LEFT JOIN room_categories c ON c.id=r.category_id
     LEFT JOIN v_room_owner o ON o.room_id=r.id LEFT JOIN units u ON u.id=o.unit_id
@@ -56,14 +56,14 @@ r.get('/dashboard', ah(async (req, res) => {
   const utilToday = await utilization(d, addDays(d, 1), unitId);
   const p3 = [d]; const rf3 = roomFilter(unitId, 'e.room_id', p3);
   const trend = await db.q(`SELECT g::date day, (SELECT count(*) FROM events e WHERE e.status='confirmed' AND e.start_at::date=g::date AND ${rf3}) events
-    FROM generate_series($1::date - 29, $1::date, '1 day') g ORDER BY 1`, p3);
+    FROM generate_series(($1::date - 29)::timestamp, $1::date::timestamp, '1 day'::interval) g ORDER BY 1`, p3);
   const p4 = []; const rf4 = roomFilter(unitId, 'f.room_id', p4);
   const fb = await db.one(`SELECT count(*) FILTER (WHERE status='baru') new, count(*) FILTER (WHERE status='diproses') process,
       count(*) FILTER (WHERE created_at > now()-interval '30 days') month, round(avg(rating) FILTER (WHERE created_at > now()-interval '90 days'),2) rating
     FROM feedbacks f WHERE ${rf4}`, p4);
   const p5 = []; const rf5 = roomFilter(unitId, 'd.room_id', p5);
   const dmg = await db.one(`SELECT count(*) FILTER (WHERE status IN ('dilaporkan','diproses')) open, count(*) FILTER (WHERE status IN ('dilaporkan','diproses') AND severity='berat') severe,
-      round(avg(extract(epoch FROM resolved_at-reported_at)/86400) FILTER (WHERE resolved_at IS NOT NULL),1) avg_days FROM room_damages d WHERE ${rf5}`, p5);
+      round((avg(extract(epoch FROM resolved_at-reported_at)/86400) FILTER (WHERE resolved_at IS NOT NULL))::numeric,1) avg_days FROM room_damages d WHERE ${rf5}`, p5);
   const p6 = []; const aw = unitId ? (p6.push(unitId), `(a.unit_id=$1 OR a.room_id IN (SELECT room_id FROM v_room_owner WHERE unit_id=$1))`) : 'TRUE';
   const assets = await db.one(`SELECT count(*) total, COALESCE(sum(a.price),0) value, COALESCE(sum(${BOOK}),0) book FROM assets a JOIN asset_codes ac ON ac.id=a.asset_code_id WHERE a.status='aktif' AND ${aw}`, p6);
   const cond = await db.q(`SELECT a.condition, count(*) n FROM assets a WHERE a.status='aktif' AND ${aw} GROUP BY 1`, p6);
@@ -110,14 +110,14 @@ async function buildReport(kind, req) {
     const p = [...ev];
     S.push({ title: 'Rekap per unit penyelenggara', columns: [C('unit', 'Unit penyelenggara'), C('events', 'Kegiatan', 'num'), C('lectures', 'Kuliah', 'num'), C('hours', 'Total jam', 'num'), C('other_unit_rooms', 'Memakai ruang unit lain', 'num')],
       rows: await db.q(`SELECT COALESCE(u.name,'(tanpa unit)') unit, count(*) events, count(*) FILTER (WHERE e.event_type='kuliah') lectures,
-          round(sum(extract(epoch FROM e.end_at-e.start_at))/3600.0,1) hours, count(*) FILTER (WHERE o.unit_id IS DISTINCT FROM e.unit_id) other_unit_rooms
+          round((sum(extract(epoch FROM e.end_at-e.start_at))/3600.0)::numeric,1) hours, count(*) FILTER (WHERE o.unit_id IS DISTINCT FROM e.unit_id) other_unit_rooms
         FROM events e LEFT JOIN units u ON u.id=e.unit_id LEFT JOIN v_room_owner o ON o.room_id=e.room_id
         WHERE e.status='confirmed' AND e.start_at < $2::date AND e.end_at > $1::date AND ${roomFilter(unitId, 'e.room_id', p)} GROUP BY u.name ORDER BY events DESC`, p) });
   }
   if (kind === 'semester') {
     const p = [...ev];
     S.push({ title: 'Beban mengajar dosen (dari jadwal terpublikasi)', columns: [C('lecturer', 'Dosen'), C('classes', 'Kelas', 'num'), C('meetings', 'Pertemuan', 'num'), C('hours', 'Jam', 'num')],
-      rows: await db.q(`SELECT pp.name lecturer, count(DISTINCT e.tt_class_id) classes, count(*) meetings, round(sum(extract(epoch FROM e.end_at-e.start_at))/3600.0,1) hours
+      rows: await db.q(`SELECT pp.name lecturer, count(DISTINCT e.tt_class_id) classes, count(*) meetings, round((sum(extract(epoch FROM e.end_at-e.start_at))/3600.0)::numeric,1) hours
         FROM events e JOIN people pp ON pp.id=e.lecturer_id WHERE e.status='confirmed' AND e.event_type='kuliah' AND e.start_at < $2::date AND e.end_at > $1::date
         AND ${roomFilter(unitId, 'e.room_id', p)} GROUP BY pp.name ORDER BY hours DESC`, p) });
   }

@@ -230,10 +230,10 @@ r.post('/tt/runs/:id/publish', roles('superadmin', 'unit_admin'), ah(async (req,
     let created = 0, expected = 0; const skipped = [];
     for (const a of run.result.assignments) {
       const title = `${a.course_code} ${a.course_name} (${a.class_name})`;
-      const exp = await c.one(`SELECT count(*) n FROM generate_series($1::date,$2::date,'1 day') d WHERE extract(isodow FROM d)=$3 AND NOT (d::date = ANY($4::date[]))`, [from, to, a.day, skip]);
+      const exp = await c.one(`SELECT count(*) n FROM generate_series($1::date,$2::date,'1 day'::interval) d WHERE extract(isodow FROM d)=$3 AND NOT (d::date = ANY($4::date[]))`, [from, to, a.day, skip]);
       const rows = await c.q(`INSERT INTO events (room_id,title,event_type,start_at,end_at,unit_id,lecturer_id,participants,tt_run_id,tt_class_id,series_id,created_by)
         SELECT $1,$2,'kuliah',(d::date + $3::time)::timestamptz,(d::date + $4::time)::timestamptz,$5,$6,$7,$8,$9,$15::uuid,$10
-        FROM generate_series($11::date,$12::date,'1 day') d WHERE extract(isodow FROM d)=$13 AND NOT (d::date = ANY($14::date[]))
+        FROM generate_series($11::date,$12::date,'1 day'::interval) d WHERE extract(isodow FROM d)=$13 AND NOT (d::date = ANY($14::date[]))
         ON CONFLICT DO NOTHING RETURNING id`,
       [a.room_id, title, a.start_time, a.end_time, run.unit_id, a.lecturer_id, a.size, run.id, a.class_id, req.user.id, from, to, a.day, skip, crypto.randomUUID()]);
       expected += exp.n; created += rows.length;
