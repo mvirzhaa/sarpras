@@ -55,7 +55,7 @@ r.get('/dashboard', ah(async (req, res) => {
   const util7 = await utilization(addDays(d, -6), addDays(d, 1), unitId);
   const utilToday = await utilization(d, addDays(d, 1), unitId);
   const p3 = [d]; const rf3 = roomFilter(unitId, 'e.room_id', p3);
-  const trend = await db.q(`SELECT g::date day, (SELECT count(*) FROM events e WHERE e.status='confirmed' AND e.start_at::date=g::date AND ${rf3}) events
+  const trend = await db.q(`SELECT g::date AS "day", (SELECT count(*) FROM events e WHERE e.status='confirmed' AND e.start_at::date=g::date AND ${rf3}) events
     FROM generate_series(($1::date - 29)::timestamp, $1::date::timestamp, '1 day'::interval) g ORDER BY 1`, p3);
   const p4 = []; const rf4 = roomFilter(unitId, 'f.room_id', p4);
   const fb = await db.one(`SELECT count(*) FILTER (WHERE status='baru') new, count(*) FILTER (WHERE status='diproses') process,
