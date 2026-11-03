@@ -58,6 +58,13 @@ Pengelola efektif sebuah ruang ditentukan view `v_room_owner`: penugasan per rua
 - Cari ruang kosong lintas unit → ajukan peminjaman → persetujuan unit pengelola → otomatis masuk jadwal; notifikasi kedua pihak.
 - Peta keterisian per lantai (terpakai/kosong/perbaikan) yang diperbarui tiap menit, dan tabulasi harian ruang × jam.
 
+**Jadwal per pertemuan & perubahan jadwal** (`src/routes/reschedule.js`)
+- Buat kegiatan **sekali**, **tiap pekan sejumlah pertemuan** (mis. 16), atau **tiap pekan sampai tanggal**. Tanggal libur/UTS/UAS dilewati tanpa mengurangi jumlah pertemuan. Setiap pertemuan bernomor (P1…P16).
+- Sebelum disimpan, layar **Periksa jadwal** menampilkan semua pertemuan. Untuk yang bentrok, pilih: pakai ruang alternatif (ruang kosong yang Anda kelola, diurutkan dari gedung & kategori yang sama), **utamakan kegiatan ini** (kegiatan yang bentrok dipindah ke ruang kosong lain), atau lewati. Ada pilihan "terapkan ke semua bentrok".
+- **Pindah / jadwal ulang** untuk satu pertemuan (acara insidentil) atau pertemuan ini dan seterusnya: ruang dan/atau hari-jam.
+- Semua perubahan disimpan dalam satu transaksi dan diperiksa ulang terhadap bentrok. Ruang & waktu semula serta alasan dicatat dan ditampilkan (tanda ⇄). Unit penyelenggara kegiatan yang dipindah mendapat notifikasi.
+- Kolom baru di tabel `events` (`session_no`, `orig_room_id`, `orig_start_at`, `change_note`) ditambahkan otomatis saat server mulai (`src/migrate.js`).
+
 **Penjadwalan kuliah otomatis** (`src/services/ga.js`)
 - Input: kelas per semester (MK, rombel, dosen, jumlah mahasiswa, durasi sesi, pertemuan/pekan, kategori/ruang wajib), cakupan ruang (semua ruang unit / kategori tertentu / ruang pilihan / seluruh kampus), hari & sesi, serta kendala.
 - Kendala keras: bentrok ruang, dosen, rombel; kapasitas & kategori ruang; jadwal berulang unit lain di ruang yang sama; kendala waktu bertanda *wajib*.

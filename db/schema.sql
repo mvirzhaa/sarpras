@@ -249,6 +249,12 @@ CREATE TABLE IF NOT EXISTS events (
   CONSTRAINT events_no_overlap EXCLUDE USING gist (room_id WITH =, tstzrange(start_at, end_at) WITH &&) WHERE (status = 'confirmed')
 );
 CREATE INDEX IF NOT EXISTS events_time_idx ON events(start_at, end_at);
+-- Pertemuan ke-n & jejak perubahan (pindah ruang / jadwal ulang)
+ALTER TABLE events ADD COLUMN IF NOT EXISTS session_no    int;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS orig_room_id  int REFERENCES rooms(id) ON DELETE SET NULL;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS orig_start_at timestamptz;
+ALTER TABLE events ADD COLUMN IF NOT EXISTS change_note   text;
+CREATE INDEX IF NOT EXISTS events_series_idx ON events(series_id) WHERE series_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS booking_requests (
   id                serial PRIMARY KEY,

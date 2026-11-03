@@ -94,7 +94,7 @@ route(/^#\/gedung\/(\d+)$/, async (view, [id]) => {
       <div class="panel"><div class="panel-head"><h3>Lantai & denah</h3><div class="actions">${sa ? `<button class="btn sm" id="addFloor">${I('plus')} Lantai</button>` : ''}</div></div>
         ${UI.table({ rows: b.floors, empty: 'Belum ada lantai.', columns: [{ label: 'Lantai', render: f => `<b>${esc(f.name || 'Lantai ' + f.level)}</b>` }, { label: 'Ukuran', render: f => `${fmt.num(f.width)} × ${fmt.num(f.height)} m` },
           { label: 'Ruang', num: true, render: f => f.room_total }, { label: 'Luas', num: true, render: f => fmt.num(f.area_total) + ' m²' },
-          { label: '', render: f => `<div class="btn-row" style="justify-content:flex-end"><a class="btn sm ${sa ? 'primary' : ''}" href="#/denah/${f.id}">${sa ? 'Gambar denah' : 'Lihat denah'}</a><a class="btn sm" href="#/peta?f=${f.id}">Keterisian</a>${sa ? `<button class="btn sm ghost" data-delfloor="${f.id}" aria-label="Hapus lantai">${I('trash')}</button>` : ''}</div>` }] })}</div>
+          { label: '', render: f => `<div class="btn-row" style="justify-content:flex-end"><a class="btn sm ${sa ? 'primary' : ''}" href="#/denah/${f.id}" target="_blank" rel="noopener" title="Buka di tab baru">${sa ? 'Gambar denah' : 'Lihat denah'}</a><a class="btn sm" href="#/peta?f=${f.id}">Keterisian</a>${sa ? `<button class="btn sm ghost" data-delfloor="${f.id}" aria-label="Hapus lantai">${I('trash')}</button>` : ''}</div>` }] })}</div>
       <div class="panel"><div class="panel-head"><h3>Data gedung</h3></div><div class="panel-body"><dl class="kv">
         <dt>Tahun dibangun</dt><dd>${esc(b.year_built || '–')}</dd><dt>Luas bangunan / tanah</dt><dd>${fmt.num(b.building_area)} / ${fmt.num(b.land_area)} m²</dd>
         <dt>Kepemilikan</dt><dd>${esc(b.ownership || '–')}</dd><dt>Kondisi</dt><dd>${esc(b.condition || '–')}</dd><dt>Sertifikat</dt><dd>${esc(b.certificate_no || '–')}</dd>
@@ -118,7 +118,7 @@ route(/^#\/denah\/(\d+)$/, async (view, [fid]) => {
   const [f, cats] = await Promise.all([API.get('/floors/' + fid), Ref.get('categories')]);
   if (!App.isSA()) { location.hash = '#/peta?f=' + fid; return; }
   view.innerHTML = App.head(`Denah ${f.building_name}`, 'Gambar ruang di kanvas, lalu lengkapi data tiap ruang di panel kanan. Perubahan baru tersimpan setelah menekan Simpan denah.',
-    `<a class="btn" href="#/gedung/${f.building_id}">Kembali ke gedung</a><button class="btn primary" id="save">${I('save')} Simpan denah</button>`) + `
+    `<a class="btn" id="back" href="#/gedung/${f.building_id}">${history.length <= 1 ? 'Tutup denah' : 'Kembali ke gedung'}</a><button class="btn primary" id="save">${I('save')} Simpan denah</button>`) + `
     <div class="floor-tabs" style="margin-bottom:10px">${f.siblings.map(s => `<button data-floor="${s.id}" class="${s.id === f.id ? 'on' : ''}">${esc(s.name || 'Lantai ' + s.level)}</button>`).join('')}</div>
     <div class="fp-layout"><div><div class="fp-toolbar no-print">
       <button class="tool on" data-tool="select" title="Pilih & pindah (V)" aria-label="Pilih">${I('pointer')}</button>
@@ -132,7 +132,7 @@ route(/^#\/denah\/(\d+)$/, async (view, [fid]) => {
       <button class="btn sm ghost" data-act="size">Ukuran ${fmt.num(f.width)}×${fmt.num(f.height)} m</button>
       ${f.siblings.length > 1 ? `<button class="btn sm ghost" data-act="copy">Salin dari lantai…</button>` : ''}
       <span class="muted" id="dirty" style="margin-left:auto;font-size:13px"></span></div>
-      <div id="fpHost"></div></div><aside class="fp-side" id="side"></aside></div>`;
+      <div id="fpHost"></div></div><aside class="fp-side" id="fpSide"></aside></div>`;
   const draftKey = 'fp_draft_' + fid;
   let fp;
   const catOpts = cats.map(c => ({ value: c.id, label: c.name }));
@@ -145,7 +145,7 @@ route(/^#\/denah\/(\d+)$/, async (view, [fid]) => {
   };
   const setTool = t => { fp.setTool(t); $$('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t)); };
   const side = (r, i) => {
-    const s = $('#side');
+    const s = $('#fpSide');
     if (!r) {
       const area = fp.rooms.reduce((a, x) => a + FPG.area(FPG.pts(x.shape)), 0);
       s.innerHTML = `<h3>${fp.rooms.length} ruang · ${fmt.num(area, 1)} m²</h3>
@@ -187,6 +187,8 @@ route(/^#\/denah\/(\d+)$/, async (view, [fid]) => {
   else localStorage.removeItem(draftKey);
   App.cleanup = () => fp.destroy();
   window.onbeforeunload = () => (fp.dirty ? 'Perubahan denah belum disimpan' : undefined);
+  // Denah dibuka di tab baru: tombol kembali menutup tab ini (tab daftar gedung masih terbuka)
+  $('#back').onclick = e => { if (history.length > 1) return; e.preventDefault(); const to = e.currentTarget.getAttribute('href'); window.close(); setTimeout(() => (location.hash = to), 300); };
   $$('[data-floor]').forEach(b => (b.onclick = async () => { if (fp.dirty && !(await UI.confirm('Perubahan lantai ini belum disimpan. Pindah lantai? (Draf tetap tersimpan di perangkat ini)', { ok: 'Pindah' }))) return; location.hash = '#/denah/' + b.dataset.floor; }));
   $$('[data-tool]').forEach(b => (b.onclick = () => setTool(b.dataset.tool)));
   $('.fp-toolbar').addEventListener('click', async e => {
@@ -280,7 +282,7 @@ route(/^#\/peta$/, async (view, _, q) => {
       <div class="floor-tabs">${floor.siblings.map(s => `<button data-floor="${s.id}" class="${s.id === floor.id ? 'on' : ''}">${esc(s.name || 'Lantai ' + s.level)}</button>`).join('')}</div>
       <input type="datetime-local" id="at" value="${fmt.local(atVal)}" style="width:auto"><button class="btn sm" id="now">Sekarang</button>
       <span class="muted" id="liveTag" style="font-size:13px">${live ? 'Diperbarui otomatis tiap menit' : ''}</span></div>
-    <div class="fp-layout view"><div id="fpHost"></div><aside class="fp-side" id="side"></aside></div>`;
+    <div class="fp-layout view"><div id="fpHost"></div><aside class="fp-side" id="fpSide"></aside></div>`;
   let fp, occ = {};
   const load = async () => {
     const at = live ? new Date() : atVal;
@@ -294,10 +296,10 @@ route(/^#\/peta$/, async (view, _, q) => {
         onSelect: r => side(r) });
     } else fp.render();
     const all = fp.rooms.filter(r => r.bookable); const busy = all.filter(r => state(r) === 'busy').length;
-    $('#side').dataset.summary = `${busy} dari ${all.length} ruang terpakai`;
-    if (!$('#side').dataset.sel) side(null);
+    $('#fpSide').dataset.summary = `${busy} dari ${all.length} ruang terpakai`;
+    if (!$('#fpSide').dataset.sel) side(null);
     function side(r) {
-      const s = $('#side');
+      const s = $('#fpSide');
       s.dataset.sel = r ? r.id : '';
       if (!r) {
         s.innerHTML = `<h3>${s.dataset.summary}</h3><p class="muted">${live ? 'Saat ini' : fmt.dt(atVal)}</p>
@@ -381,7 +383,7 @@ route(/^#\/jadwal$/, async (view, _, q) => {
         return `<div class="week-col"><div class="week-head ${ymd === fmt.ymd(new Date()) ? 'today' : ''}">${HARI[d.getDay()]}<br><small>${d.getDate()} ${BULAN[d.getMonth()]}</small></div>
           <div class="week-body">${Array.from({ length: h2 - h1 }, (_, k) => `<div class="week-hr click" data-slot="${ymd}T${pad(h1 + k)}:00"></div>`).join('')}
           ${list.map(e => { const s = new Date(e.start_at), en = new Date(e.end_at); const top = ((s.getHours() - h1) * 60 + s.getMinutes()) / 60 * HR, ht = Math.max(18, (en - s) / 3600000 * HR - 2);
-            return `<div class="week-ev ${e.event_type}" data-evi="${e.id}" style="top:${top}px;height:${ht}px"><b>${fmt.time(s)}</b> ${esc(e.title)}<br><small>${esc(e.unit_name || '')}</small></div>`; }).join('')}</div></div>`; }).join('')}
+            return `<div class="week-ev ${e.event_type} ${e.change_note ? 'moved' : ''}" data-evi="${e.id}" style="top:${top}px;height:${ht}px" title="${esc(e.change_note || '')}"><b>${fmt.time(s)}</b> ${esc(e.title)}${e.session_no ? ` <span class="ev-no">P${e.session_no}</span>` : ''}${e.change_note ? ' <span class="ev-mv" aria-label="dipindah">⇄</span>' : ''}<br><small>${esc(e.unit_name || '')}</small></div>`; }).join('')}</div></div>`; }).join('')}
     </div><p class="muted" style="margin-top:8px;font-size:13px">Klik slot kosong untuk ${room.can_manage ? 'membuat kegiatan' : 'mengajukan peminjaman'}.</p>`;
   $('#roomSel').onchange = e => setQ('#/jadwal', { room: e.target.value, week: q.week });
   $$('[data-wk]', view).forEach(b => (b.onclick = () => { const d = b.dataset.wk === '0' ? new Date() : new Date(ws.getTime() + Number(b.dataset.wk) * 86400000); setQ('#/jadwal', { room: roomId, week: fmt.ymd(d) }); }));
@@ -393,31 +395,172 @@ route(/^#\/jadwal$/, async (view, _, q) => {
   });
 });
 
+// ---------- Detail kegiatan ----------
+const EV_TYPE = t => (EVENT_TYPES.find(x => x[0] === t) || [, t])[1];
 Pages.eventModal = (e, canManage) => {
-  const m = UI.modal({ title: e.title, body: `<dl class="kv"><dt>Ruang</dt><dd>${esc(e.room_code || '')} ${esc(e.room_name || '')}</dd><dt>Waktu</dt><dd>${fmt.dt(e.start_at)} – ${fmt.time(e.end_at)}</dd>
-    <dt>Jenis</dt><dd>${esc((EVENT_TYPES.find(t => t[0] === e.event_type) || [, e.event_type])[1])}</dd><dt>Penyelenggara</dt><dd>${esc(e.unit_name || '–')}</dd>
-    ${e.lecturer_name ? `<dt>Dosen</dt><dd>${esc(e.lecturer_name)}</dd>` : ''}${e.participants ? `<dt>Peserta</dt><dd>${e.participants}</dd>` : ''}${e.description ? `<dt>Keterangan</dt><dd>${esc(e.description)}</dd>` : ''}
-    ${e.series_id ? '<dt>Pola</dt><dd>Berulang mingguan</dd>' : ''}</dl>`,
+  const sess = e.session_no ? `Pertemuan ke-${e.session_no}${e.series_total ? ` dari ${e.series_total}` : ''}` : e.series_id ? 'Berulang mingguan' : '';
+  const m = UI.modal({ title: e.title, body: `<dl class="kv"><dt>Ruang</dt><dd>${esc(e.room_code || '')} ${esc(e.room_name || '')}${e.orig_room_code ? ` <span class="badge warn">semula ${esc(e.orig_room_code)}</span>` : ''}</dd>
+    <dt>Waktu</dt><dd>${fmt.dt(e.start_at)} – ${fmt.time(e.end_at)}${e.orig_start_at ? ` <span class="badge warn">semula ${fmt.dt(e.orig_start_at)}</span>` : ''}</dd>
+    ${sess ? `<dt>Pola</dt><dd>${sess}</dd>` : ''}<dt>Jenis</dt><dd>${esc(EV_TYPE(e.event_type))}</dd><dt>Penyelenggara</dt><dd>${esc(e.unit_name || '–')}</dd>
+    ${e.lecturer_name ? `<dt>Dosen</dt><dd>${esc(e.lecturer_name)}</dd>` : ''}${e.participants ? `<dt>Peserta</dt><dd>${e.participants}</dd>` : ''}${e.description ? `<dt>Keterangan</dt><dd>${esc(e.description)}</dd>` : ''}</dl>
+    ${e.change_note ? `<p class="ev-note">${I('swap')} ${esc(e.change_note)}</p>` : ''}
+    ${e.series_id ? '<button class="btn sm" id="evSeries" style="margin-top:12px">Lihat semua pertemuan</button>' : ''}`,
   actions: canManage ? [
-    ...(e.series_id ? [{ label: 'Batalkan seri berikutnya', kind: 'danger', onClick: async () => { if (!(await UI.confirm('Batalkan kegiatan ini dan semua pertemuan berikutnya dalam seri?', { danger: true }))) return false; await API.del(`/events/${e.id}?scope=series`); App.render(); } }] : []),
-    { label: 'Batalkan', kind: 'danger', onClick: async () => { if (!(await UI.confirm('Batalkan kegiatan ini?', { danger: true }))) return false; await API.del('/events/' + e.id); App.render(); } },
-    { label: 'Ubah', kind: 'primary', onClick: () => { setTimeout(() => Pages.eventForm(e), 0); } }] : [{ label: 'Tutup' }] });
+    { label: 'Batalkan…', kind: 'danger', onClick: async () => {
+      const series = e.series_id && await UI.confirm('Batalkan <b>pertemuan ini saja</b>? Pilih <b>Seri berikutnya</b> untuk membatalkan pertemuan ini dan semua sesudahnya.', { ok: 'Pertemuan ini saja', danger: true, alt: 'Seri berikutnya' });
+      if (e.series_id) { if (series === false) return false; await API.del(`/events/${e.id}${series === 'alt' ? '?scope=series' : ''}`); }
+      else { if (!(await UI.confirm('Batalkan kegiatan ini?', { danger: true }))) return false; await API.del('/events/' + e.id); }
+      UI.toast('Kegiatan dibatalkan'); App.render(); } },
+    { label: 'Ubah detail', onClick: () => { setTimeout(() => Pages.eventForm(e), 0); } },
+    { label: 'Pindah / jadwal ulang', kind: 'primary', onClick: () => { setTimeout(() => Pages.moveForm(e), 0); } }] : [{ label: 'Tutup' }] });
+  const sb = $('#evSeries', m.el); if (sb) sb.onclick = () => Pages.seriesModal(e);
   return m;
 };
+Pages.seriesModal = async e => {
+  const rows = await API.get('/events', { series_id: e.series_id });
+  UI.modal({ title: `Semua pertemuan · ${e.title}`, wide: true, body: UI.table({ rows, columns: [
+    { label: 'Ke', num: true, render: x => x.session_no || '–' }, { label: 'Tanggal', render: x => `${HARI[new Date(x.start_at).getDay()]}, ${fmt.date(x.start_at)}` },
+    { label: 'Jam', render: x => `${fmt.time(x.start_at)}–${fmt.time(x.end_at)}` }, { label: 'Ruang', render: x => `<b class="mono">${esc(x.room_code)}</b>${x.orig_room_code ? ` <small class="muted">semula ${esc(x.orig_room_code)}</small>` : ''}` },
+    { label: 'Catatan', render: x => (x.id === e.id ? '<span class="badge info">dipilih</span> ' : '') + esc(x.change_note || '') }] }), actions: [{ label: 'Tutup' }] });
+};
+
+// ---------- Buat kegiatan (sekali / sejumlah pertemuan / sampai tanggal) ----------
 Pages.eventForm = async (v) => {
   const people = await Ref.opts('people', p => p.name + (p.id_number ? ` (${p.id_number})` : ''));
   const edit = !!v.id;
-  const fields = [{ name: 'title', label: 'Nama kegiatan', required: true, full: true }, { name: 'event_type', label: 'Jenis', type: 'select', empty: false, options: EVENT_TYPES.map(([a, b]) => ({ value: a, label: b })) },
-    { name: 'participants', label: 'Jumlah peserta', type: 'number', min: 0 }, { name: 'start_at', label: 'Mulai', type: 'datetime', required: true }, { name: 'end_at', label: 'Selesai', type: 'datetime', required: true },
+  const common = [{ name: 'title', label: 'Nama kegiatan', required: true, full: true }, { name: 'event_type', label: 'Jenis', type: 'select', empty: false, options: EVENT_TYPES.map(([a, b]) => ({ value: a, label: b })) },
+    { name: 'participants', label: 'Jumlah peserta', type: 'number', min: 0 }];
+  if (edit) {   // detail saja; ruang & waktu lewat "Pindah / jadwal ulang"
+    const fields = [...common, { name: 'lecturer_id', label: 'Dosen (untuk kuliah)', type: 'select', options: people }, { name: 'attendance', label: 'Realisasi peserta', type: 'number', min: 0 }, { name: 'description', label: 'Keterangan', type: 'textarea' }];
+    return UI.formModal({ title: 'Ubah detail kegiatan', fields, values: v, extra: '<p class="muted" style="margin-top:10px;font-size:13px">Untuk mengubah ruang atau waktu, gunakan <b>Pindah / jadwal ulang</b>.</p>',
+      onSubmit: async x => { await API.put('/events/' + v.id, x); UI.toast('Kegiatan disimpan'); App.render(); } });
+  }
+  const per = ((await Ref.get('periods').catch(() => [])) || []).find(p => p.is_active);
+  const fields = [...common, { name: 'start_at', label: 'Mulai (pertemuan pertama)', type: 'datetime', required: true }, { name: 'end_at', label: 'Selesai', type: 'datetime', required: true },
     { name: 'lecturer_id', label: 'Dosen (untuk kuliah)', type: 'select', options: people },
-    ...(edit ? [{ name: 'room_id', label: 'Pindah ke ruang', type: 'select', empty: false, options: await Ref.roomOpts(!App.isSA()) }, { name: 'attendance', label: 'Realisasi peserta', type: 'number', min: 0 }]
-      : [{ name: 'repeat_until', label: 'Ulangi tiap pekan sampai', type: 'date', help: 'Kosongkan untuk kegiatan sekali' }]),
+    { name: 'pattern', label: 'Pengulangan', type: 'select', empty: false, options: [{ value: 'once', label: 'Sekali saja' }, { value: 'sessions', label: 'Tiap pekan, sejumlah pertemuan' }, { value: 'until', label: 'Tiap pekan, sampai tanggal' }] },
+    { name: 'sessions', label: 'Jumlah pertemuan', type: 'number', min: 1, default: 16, help: 'Tanggal yang dilewati tidak dihitung, jadi jumlah pertemuan tetap.' },
+    { name: 'repeat_until', label: 'Sampai tanggal', type: 'date', help: per ? `Akhir periode aktif: ${fmt.date(per.end_date)}` : '' },
+    { name: 'skip_dates', label: 'Tanggal yang dilewati (libur, UTS, UAS)', full: true, placeholder: 'mis. 25/12/2026, 1/1/2027, 2027-01-12', help: 'Pisahkan dengan koma. Pada tanggal ini tidak ada pertemuan.' },
     { name: 'description', label: 'Keterangan', type: 'textarea' }];
-  UI.formModal({ title: edit ? 'Ubah kegiatan' : 'Buat kegiatan', fields, values: { event_type: 'rapat', ...v }, onSubmit: async x => {
-    if (edit) await API.put('/events/' + v.id, x);
-    else { const r = await API.post('/events', { ...x, room_id: v.room_id }); if (r.skipped && r.skipped.length) UI.toast(`${r.created.length} pertemuan dibuat, ${r.skipped.length} dilewati karena bentrok`, true); }
-    UI.toast('Kegiatan disimpan'); App.render();
+  const values = { event_type: v.event_type || 'kuliah', pattern: v.repeat_until ? 'until' : 'once', repeat_until: v.repeat_until || (per && per.end_date), ...v };
+  const m = UI.formModal({ title: 'Buat kegiatan', fields, values, submit: 'Periksa jadwal', onSubmit: async x => {
+    const body = { room_id: v.room_id, start_at: x.start_at, end_at: x.end_at, participants: x.participants, skip_dates: x.pattern === 'once' ? '' : x.skip_dates,
+      sessions: x.pattern === 'sessions' ? x.sessions : null, repeat_until: x.pattern === 'until' ? x.repeat_until : null };
+    if (x.pattern === 'sessions' && !(x.sessions >= 1)) throw new Error('Isi jumlah pertemuan');
+    if (x.pattern === 'until' && !x.repeat_until) throw new Error('Isi tanggal akhir pengulangan');
+    const plan = await API.post('/events/plan', body);
+    const base = { title: x.title, event_type: x.event_type, participants: x.participants, lecturer_id: x.lecturer_id, description: x.description };
+    if (plan.items.length === 1 && plan.items[0].status === 'ok' && !plan.capacity_warning) { await Pages.applyPlan(plan, base, {}); return; }
+    setTimeout(() => Pages.planner(plan, base), 0);
   } });
+  // tampilkan isian sesuai pola pengulangan
+  const sync = () => { const pat = $('[name=pattern]', m.el).value;
+    const show = (n, on) => { const f = $(`[name=${n}]`, m.el).closest('.field'); f.style.display = on ? '' : 'none'; };
+    show('sessions', pat === 'sessions'); show('repeat_until', pat === 'until'); show('skip_dates', pat !== 'once'); };
+  $('[name=pattern]', m.el).addEventListener('change', sync); sync();
+  return m;
+};
+
+// ---------- Pindah ruang / jadwal ulang ----------
+Pages.moveForm = async e => {
+  const rooms = await Ref.roomOpts(!App.isSA());
+  const fields = [
+    ...(e.series_id ? [{ name: 'scope', label: 'Berlaku untuk', type: 'select', empty: false, full: true, options: [
+      { value: 'one', label: `Pertemuan ini saja${e.session_no ? ` (ke-${e.session_no})` : ''} — mis. ada acara insidentil` }, { value: 'following', label: 'Pertemuan ini dan seterusnya' }] }] : []),
+    { name: 'room_id', label: 'Ruang', type: 'select', empty: false, full: true, options: rooms },
+    { name: 'start_at', label: 'Mulai', type: 'datetime', required: true }, { name: 'end_at', label: 'Selesai', type: 'datetime', required: true },
+    { name: 'note', label: 'Alasan perubahan', full: true, placeholder: 'mis. ruang dipakai Seminar Nasional', help: 'Ditampilkan di jadwal dan dikirim ke unit penyelenggara.' }];
+  const m = UI.formModal({ title: `Pindah / jadwal ulang · ${e.title}`, wide: true, fields, values: { scope: 'one', ...e },
+    extra: `<div style="margin-top:12px"><button class="btn sm" id="mvFree" type="button">${I('search')} Tampilkan ruang kosong pada waktu ini</button><div id="mvList" style="margin-top:8px"></div></div>`,
+    submit: 'Periksa perubahan', onSubmit: async x => {
+      const plan = await API.post(`/events/${e.id}/plan-move`, { scope: x.scope || 'one', room_id: x.room_id, start_at: x.start_at, end_at: x.end_at });
+      plan.note = x.note;
+      if (plan.items.length === 1 && plan.items[0].status === 'ok') { await Pages.applyPlan(plan, null, { note: x.note }); return; }
+      setTimeout(() => Pages.planner(plan, null), 0);
+    } });
+  $('#mvFree', m.el).onclick = async () => {
+    let x; try { x = UI.read(m.body, fields.filter(f => f.name !== 'note')); } catch (er) { return UI.err(er); }
+    const list = (await API.get('/availability', { start_at: x.start_at, end_at: x.end_at, capacity: e.participants || 0 })).filter(r => r.mine);
+    $('#mvList', m.el).innerHTML = list.length ? `<div class="rd-chips" style="padding:0">${list.slice(0, 12).map(r => `<button type="button" class="rd-chip" data-pickroom="${r.id}">${esc(r.code)} · ${r.capacity} org</button>`).join('')}</div>`
+      : '<p class="muted">Tidak ada ruang kosong yang Anda kelola pada waktu ini.</p>';
+  };
+  $('#mvList', m.el).addEventListener('click', ev => { const b = ev.target.closest('[data-pickroom]'); if (b) { $('[name=room_id]', m.el).value = b.dataset.pickroom; UI.toast('Ruang dipilih: ' + b.textContent); } });
+};
+
+// ---------- Periksa rencana: tindakan untuk tiap pertemuan bentrok ----------
+Pages.planner = (plan, base) => {
+  const create = plan.mode === 'create', S = plan.summary;
+  const roomLbl = r => `${r.code} · ${r.name} (${r.capacity} org)`;
+  const optsFor = (it, i) => {
+    const o = [];
+    (it.alternatives || []).forEach(a => o.push([`alt:${a.id}`, `Pakai ruang ${roomLbl(a)}`]));
+    const cf = it.conflicts || [];
+    if (cf.length === 1) cf[0].bump_targets.forEach(t => o.push([`bump:${t.id}`, `Utamakan ini — pindahkan “${cf[0].title}” ke ${t.code}`]));
+    else if (cf.length > 1 && cf.every(c => c.bump_targets.length)) o.push(['bumpall', `Utamakan ini — pindahkan ${cf.length} kegiatan (${cf.map(c => `${c.title} → ${c.bump_targets[0].code}`).join('; ')})`]);
+    o.push(['skip', create ? 'Lewati pertemuan ini' : 'Biarkan di jadwal semula']);
+    return o.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
+  };
+  const rows = plan.items.map((it, i) => {
+    const d = new Date(it.start_at);
+    const when = `${HARI[d.getDay()]}, ${fmt.date(it.start_at)}`, jam = `${fmt.time(it.start_at)}–${fmt.time(it.end_at)}`;
+    const roomCode = it.room_id === plan.room.id ? plan.room.code : (it.alternatives || [])[0] ? plan.room.code : '';
+    if (it.holiday) return `<tr class="pl-hol"><td class="num">–</td><td>${when}</td><td>${jam}</td><td></td><td><span class="badge">Dilewati (libur)</span></td></tr>`;
+    const status = it.status === 'ok' ? `<span class="badge ok">Siap</span>${it.past ? ' <span class="badge warn">sudah lewat</span>' : ''}`
+      : `<div class="pl-cf">Bentrok: ${it.conflicts.map(c => `<b>${esc(c.title)}</b>${c.unit_name ? ` <small>(${esc(c.unit_name)})</small>` : ''} ${fmt.time(c.start_at)}–${fmt.time(c.end_at)}`).join(', ')}</div>
+         <select data-act="${i}">${optsFor(it, i)}</select>`;
+    return `<tr class="${it.status === 'conflict' ? 'pl-bad' : ''}"><td class="num">${it.no || '–'}</td><td>${when}</td><td>${jam}</td><td class="mono">${esc(roomCode || plan.room.code)}</td><td>${status}</td></tr>`;
+  }).join('');
+  const multi = S.conflict > 1;
+  const m = UI.modal({ title: create ? `Periksa jadwal · ${base.title}` : `Periksa perubahan · ${plan.event.title}`, wide: true, body: `
+    <div class="pl-sum">${create ? `<b>${S.total}</b> pertemuan` : `<b>${S.total}</b> pertemuan diubah`} · <span class="badge ok">${S.ok} siap</span>
+      ${S.conflict ? `<span class="badge bad">${S.conflict} bentrok</span>` : ''}${S.holiday ? `<span class="badge">${S.holiday} tanggal dilewati</span>` : ''} · ruang <b>${esc(plan.room.code)}</b> ${esc(plan.room.name)}</div>
+    ${plan.capacity_warning ? `<div class="form-error" style="margin:8px 0">${esc(plan.capacity_warning)}</div>` : ''}
+    ${S.conflict ? `<p class="muted" style="font-size:13px;margin:6px 0">Pilih tindakan untuk tiap pertemuan yang bentrok: pakai ruang lain, <b>utamakan kegiatan ini</b> (kegiatan yang bentrok dipindah ke ruang kosong lain dan unitnya diberi notifikasi), atau lewati.</p>` : ''}
+    ${multi ? `<label class="field" style="max-width:420px"><span>Terapkan ke semua bentrok</span><select id="plAll"><option value="">— pilih satu per satu —</option><option value="alt">Pakai ruang alternatif pertama</option><option value="bump">Utamakan kegiatan ini</option><option value="skip">${create ? 'Lewati semua' : 'Biarkan semua'}</option></select></label>` : ''}
+    <div class="pl-wrap"><table class="table pl"><thead><tr><th class="num">Ke</th><th>Tanggal</th><th>Jam</th><th>Ruang</th><th>Status / tindakan</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${S.conflict || !create ? `<label class="field" style="margin-top:12px"><span>${create ? 'Catatan untuk kegiatan yang dipindah' : 'Alasan perubahan'}</span><input id="plNote" value="${esc(plan.note || '')}" placeholder="mis. ruang dipakai Seminar Nasional"></label>` : ''}
+    <p class="muted" id="plCount" style="margin-top:8px;font-size:13px"></p>`,
+  actions: [{ label: 'Kembali' }, { label: 'Simpan', kind: 'primary', onClick: async () => {
+    const choice = {}; $$('[data-act]', m.el).forEach(s => (choice[s.dataset.act] = s.value));
+    await Pages.applyPlan(plan, base, { choice, note: ($('#plNote', m.el) || {}).value });
+  } }] });
+  const count = () => {
+    const skipped = $$('[data-act]', m.el).filter(s => s.value === 'skip').length, bumped = $$('[data-act]', m.el).filter(s => s.value.startsWith('bump')).length;
+    $('#plCount', m.el).textContent = create
+      ? `${S.total - skipped} pertemuan akan disimpan${skipped ? ` (${skipped} dilewati)` : ''}${bumped ? `; ${bumped} kegiatan lain dipindah ruang` : ''}.`
+      : `${S.total - skipped} pertemuan akan diubah${skipped ? `, ${skipped} tetap di jadwal semula` : ''}${bumped ? `; ${bumped} kegiatan lain dipindah ruang` : ''}.`;
+  };
+  m.el.addEventListener('change', ev => {
+    if (ev.target.id === 'plAll' && ev.target.value) $$('[data-act]', m.el).forEach(s => {
+      const want = ev.target.value, opt = [...s.options].find(o => want === 'alt' ? o.value.startsWith('alt:') : want === 'bump' ? o.value.startsWith('bump') : o.value === 'skip');
+      if (opt) s.value = opt.value;
+    });
+    count();
+  });
+  count();
+};
+// Kirim rencana yang sudah diputuskan
+Pages.applyPlan = async (plan, base, { choice = {}, note } = {}) => {
+  const items = [], bumps = [];
+  plan.items.forEach((it, i) => {
+    if (it.holiday) return;
+    let room = it.room_id;
+    if (it.status === 'conflict') {
+      const c = choice[i] || 'skip';
+      if (c === 'skip') return;
+      if (c.startsWith('alt:')) room = Number(c.slice(4));
+      else if (c.startsWith('bump:')) bumps.push({ event_id: it.conflicts[0].id, to_room_id: Number(c.slice(5)) });
+      else if (c === 'bumpall') it.conflicts.forEach(x => bumps.push({ event_id: x.id, to_room_id: x.bump_targets[0].id }));
+    }
+    items.push(plan.mode === 'create' ? { start_at: it.start_at, end_at: it.end_at, room_id: room } : { event_id: it.event_id, start_at: it.start_at, end_at: it.end_at, room_id: room });
+  });
+  if (!items.length) throw new Error('Tidak ada pertemuan yang disimpan');
+  if (plan.mode === 'create' && items.length > 1) items.forEach((x, k) => (x.no = k + 1));   // nomor pertemuan berurutan
+  const r = await API.post('/events/apply', { mode: plan.mode, base, items, bumps, note });
+  UI.toast(plan.mode === 'create' ? `${r.created} pertemuan tersimpan${r.moved ? `, ${r.moved} kegiatan lain dipindah ruang` : ''}` : `${r.updated} pertemuan diperbarui${r.moved ? `, ${r.moved} kegiatan lain dipindah ruang` : ''}`);
+  $$('.modal-bg').forEach(x => x.remove());
+  App.render();
 };
 Pages.bookingForm = (v, room) => UI.formModal({
   title: `Ajukan peminjaman ${room ? room.code : ''}`, values: { event_type: 'rapat', ...v },

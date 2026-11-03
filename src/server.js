@@ -34,6 +34,7 @@ mainApp.use('/api/public', feedback.pub);
 mainApp.use('/api', core.router); // /auth/login publik, sisanya dilindungi authRequired di dalam router
 mainApp.use('/api', require('./routes/buildings'));
 mainApp.use('/api', require('./routes/schedule').router);
+mainApp.use('/api', require('./routes/reschedule'));
 mainApp.use('/api', require('./routes/timetable'));
 mainApp.use('/api', require('./routes/assets').router);
 mainApp.use('/api', require('./routes/inventory'));
@@ -105,4 +106,6 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 });
 
 const port = Number(process.env.PORT || 3000);
-app.listen(port, () => console.log(`SARPRAS berjalan di http://localhost:${port}${basePath}`));
+require('./migrate')()
+  .catch(e => console.error('Migrasi otomatis gagal (jalankan npm run db:init):', e.message))
+  .finally(() => app.listen(port, () => console.log(`SARPRAS berjalan di http://localhost:${port}${basePath}`)));

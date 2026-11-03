@@ -32,13 +32,25 @@ Hanya Super Admin yang dapat mengubah denah; peran lain melihat saja.`,
 Kategori bisa diimpor dari Excel lewat tombol **Impor Excel**.`,
   },
   {
-    id: 'jadwal', title: 'Membuat kegiatan di jadwal ruang', roles: ['superadmin', 'unit_admin'],
-    keywords: ['buat kegiatan', 'membuat kegiatan', 'tambah kegiatan', 'kegiatan rutin', 'acara rutin', 'jadwal ruang', 'input jadwal', 'tambah jadwal', 'kegiatan berulang', 'jadwal rutin', 'batalkan kegiatan', 'hapus jadwal', 'ubah jadwal'],
-    answer: `Buka [Jadwal ruang](#/jadwal), pilih ruang dan pekan, lalu klik **Buat kegiatan** (atau klik slot kosong).
-- Isi nama, jenis, waktu mulai dan selesai.
-- Untuk kegiatan rutin, isi **Ulangi tiap pekan sampai**.
-Sistem menolak waktu yang bentrok. Pada kegiatan berulang, pertemuan yang bentrok dilewati dan dilaporkan.
-Klik kegiatan untuk mengubah atau membatalkannya; pada kegiatan berulang tersedia **Batalkan seri berikutnya**.`,
+    id: 'jadwal', title: 'Membuat kegiatan & jadwal kuliah per pertemuan', roles: ['superadmin', 'unit_admin'],
+    keywords: ['buat kegiatan', 'membuat kegiatan', 'tambah kegiatan', 'kegiatan rutin', 'acara rutin', 'jadwal ruang', 'input jadwal', 'tambah jadwal', 'kegiatan berulang', 'jadwal rutin',
+      'pertemuan', 'jumlah pertemuan', '16 pertemuan', 'jadwal kuliah manual', 'libur', 'uts', 'uas'],
+    answer: `Buka [Jadwal ruang](#/jadwal), pilih ruang, lalu klik **Buat kegiatan** (atau klik slot kosong).
+- Isi nama, jenis, dan waktu pertemuan pertama.
+- **Pengulangan**: *Sekali saja*, *Tiap pekan, sejumlah pertemuan* (mis. 16), atau *Tiap pekan, sampai tanggal*.
+- **Tanggal yang dilewati**: libur, UTS, UAS (mis. *25/12/2026, 1/1/2027*). Tanggal ini tidak dihitung, jadi jumlah pertemuan tetap.
+Klik **Periksa jadwal** untuk melihat semua pertemuan. Untuk pertemuan yang bentrok, pilih: pakai ruang lain, **utamakan kegiatan ini** (kegiatan yang bentrok dipindah), atau lewati. Lalu **Simpan**.
+Setiap pertemuan bernomor (P1, P2, …) di jadwal pekanan.`,
+  },
+  {
+    id: 'pindah', title: 'Memindah ruang / jadwal ulang kegiatan', roles: ['superadmin', 'unit_admin'],
+    keywords: ['pindah ruang', 'pindahkan', 'jadwal ulang', 'reschedule', 'ganti ruang', 'ganti jam', 'acara insidentil', 'insidentil', 'mendadak', 'geser jadwal', 'tukar ruang', 'pindah jadwal'],
+    answer: `Klik kegiatan di [Jadwal ruang](#/jadwal) › **Pindah / jadwal ulang**.
+- **Berlaku untuk**: *pertemuan ini saja* (untuk acara insidentil) atau *pertemuan ini dan seterusnya*.
+- Pilih ruang dan/atau waktu baru. **Tampilkan ruang kosong pada waktu ini** membantu memilih ruang.
+- Isi alasan; alasan ini tampil di jadwal dan dikirim ke unit penyelenggara.
+**Acara insidentil di ruang yang sudah terpakai**: buat kegiatannya seperti biasa. Di layar periksa jadwal, pilih **Utamakan ini — pindahkan "…" ke ruang X**. Kegiatan lama dipindah ke ruang kosong dan unitnya mendapat notifikasi.
+Kegiatan yang dipindah bertanda ⇄ dan menampilkan ruang/waktu semula. **Lihat semua pertemuan** menampilkan seluruh seri.`,
   },
   {
     id: 'pinjam', title: 'Meminjam ruang unit lain', roles: ['superadmin', 'unit_admin'],

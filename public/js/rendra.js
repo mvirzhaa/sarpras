@@ -32,6 +32,9 @@ const Rendra = {
     $('#rdLog').addEventListener('click', Rendra.onClick);
     $('#rdChips').addEventListener('click', e => { const c = e.target.closest('[data-chip]'); if (c) Rendra.send(c.dataset.chip); });
     API.get('/rendra/info').then(i => { Rendra.info = i; $('#rdMode').textContent = i.mode === 'ai' ? 'Asisten SARPRAS · AI' : 'Asisten SARPRAS'; if (!Rendra.msgs.length) Rendra.render(); }).catch(() => {});
+    // Di halaman denah & peta, tombol diperkecil agar tidak menutupi kontrol panel kanan
+    const compact = () => root.classList.toggle('rd-compact', /^#\/(denah|peta)/.test(location.hash));
+    window.addEventListener('hashchange', compact); compact();
     Rendra.render();
   },
   toggle(v) {

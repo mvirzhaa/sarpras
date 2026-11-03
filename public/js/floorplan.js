@@ -74,7 +74,7 @@ class FloorPlan {
     const nw = Math.min(Math.max(v.w * f, 3), Math.max(this.o.width, this.o.height) * 6);
     const k = nw / v.w; this.vb = { x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k, w: v.w * k, h: v.h * k }; this.applyVB();
   }
-  px() { return this.vb.w / (this.svg.clientWidth || 800); } // meter per piksel
+  px() { return this.vb ? this.vb.w / (this.svg.clientWidth || 800) : 0.05; } // meter per piksel
   pt(e) { const p = this.svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; const r = p.matrixTransform(this.w.getScreenCTM().inverse()); return [r.x, r.y]; }
   snap(v, e) { return e && e.altKey ? FPG.round(v) : Math.round(v / this.o.grid) * this.o.grid; }
   color(r) { if (this.o.colorOf) return this.o.colorOf(r); const c = this.cat.get(Number(r.category_id)); return c ? c.color : '#B8C4C0'; }
@@ -111,19 +111,19 @@ class FloorPlan {
         : s.points.map((q, i) => ['v' + i, q[0], q[1]]);
       h += handles.map(([id, x, y]) => `<rect class="fp-handle" data-h="${id}" x="${x - hs / 2}" y="${y - hs / 2}" width="${hs}" height="${hs}" vector-effect="non-scaling-stroke" style="cursor:${id.startsWith('v') ? 'move' : { n: 'ns', s: 'ns', e: 'ew', w: 'ew', nw: 'nwse', se: 'nwse', ne: 'nesw', sw: 'nesw' }[id] + '-resize'}"/>`).join('');
       const b = FPG.bbox(FPG.pts(s));
-      h += `<text class="fp-dim" x="${b.x + b.w / 2}" y="${b.y - 6 * k}" text-anchor="middle" font-size="${12 * k}">${FPG.round(b.w)} m</text>
-            <text class="fp-dim" x="${b.x + b.w + 6 * k}" y="${b.y + b.h / 2}" font-size="${12 * k}">${FPG.round(b.h)} m</text>`;
+      h += `<text class="fp-dim" stroke-width="${3 * k}" x="${b.x + b.w / 2}" y="${b.y - 6 * k}" text-anchor="middle" font-size="${12 * k}">${FPG.round(b.w)} m</text>
+            <text class="fp-dim" stroke-width="${3 * k}" x="${b.x + b.w + 6 * k}" y="${b.y + b.h / 2}" font-size="${12 * k}">${FPG.round(b.h)} m</text>`;
     }
     if (this.drag && this.drag.kind === 'draw') {
       const d = this.drag, x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1), w = Math.abs(d.x1 - d.x0), hh = Math.abs(d.y1 - d.y0);
       h += `<rect class="fp-preview" x="${x}" y="${y}" width="${w}" height="${hh}" vector-effect="non-scaling-stroke"/>
-            <text class="fp-dim" x="${x + w / 2}" y="${y + hh / 2}" text-anchor="middle" font-size="${13 * k}">${FPG.round(w)} × ${FPG.round(hh)} m = ${FPG.round(w * hh)} m²</text>`;
+            <text class="fp-dim" stroke-width="${3 * k}" x="${x + w / 2}" y="${y + hh / 2}" text-anchor="middle" font-size="${13 * k}">${FPG.round(w)} × ${FPG.round(hh)} m = ${FPG.round(w * hh)} m²</text>`;
     }
     if (this.poly) {
       const pts = [...this.poly.points, this.poly.cursor].filter(Boolean);
       h += `<polyline class="fp-preview" points="${pts.map(q => q.join(',')).join(' ')}" fill="rgba(46,99,144,.08)" vector-effect="non-scaling-stroke"/>`;
       h += this.poly.points.map((q, i) => `<circle cx="${q[0]}" cy="${q[1]}" r="${(i ? 3.5 : 6) * k}" class="fp-handle" vector-effect="non-scaling-stroke"/>`).join('');
-      if (this.poly.cursor && this.poly.points.length) { const a = this.poly.points[this.poly.points.length - 1], c = this.poly.cursor; h += `<text class="fp-dim" x="${(a[0] + c[0]) / 2}" y="${(a[1] + c[1]) / 2 - 6 * k}" font-size="${12 * k}">${FPG.round(Math.hypot(c[0] - a[0], c[1] - a[1]))} m</text>`; }
+      if (this.poly.cursor && this.poly.points.length) { const a = this.poly.points[this.poly.points.length - 1], c = this.poly.cursor; h += `<text class="fp-dim" stroke-width="${3 * k}" x="${(a[0] + c[0]) / 2}" y="${(a[1] + c[1]) / 2 - 6 * k}" font-size="${12 * k}">${FPG.round(Math.hypot(c[0] - a[0], c[1] - a[1]))} m</text>`; }
     }
     this.gO.innerHTML = h;
   }

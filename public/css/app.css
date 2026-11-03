@@ -156,7 +156,8 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 .fp-room.dim { opacity: .35; }
 .fp-handle { fill: #fff; stroke: var(--blue); stroke-width: 1.5; }
 .fp-preview { fill: rgba(46,99,144,.12); stroke: var(--blue); stroke-dasharray: 5 4; stroke-width: 1.5; }
-.fp-dim { font: 600 12px var(--font); fill: var(--blue); paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+/* Ukuran huruf & tebal tepi label diatur di JS dalam satuan meter (mengikuti zoom); jangan diberi px di sini */
+.fp-dim { font-family: var(--font); font-weight: 600; fill: var(--blue); paint-order: stroke; stroke: #fff; stroke-linejoin: round; pointer-events: none; }
 .fp-hint { position: absolute; left: 10px; bottom: 10px; background: rgba(28,42,39,.85); color: #fff; font-size: 12.5px; padding: 5px 10px; border-radius: 4px; pointer-events: none; }
 .fp-zoom { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: var(--r-sm); }
 .fp-side { border-left: 1px solid var(--line); padding: 14px; overflow-y: auto; max-height: calc(min(70vh, 720px) + 52px); }
@@ -302,3 +303,24 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 .rd-rooms { grid-template-columns: minmax(0, 1fr); }
 .rd-room { min-width: 0; }
 .rd-room .badge, .rd-room .btn { flex: none; }
+#rendra.rd-compact .rd-fab-l { display: none; }
+#rendra.rd-compact .rd-fab { padding: 6px; }
+#rendra.rd-compact { right: 6px; bottom: 6px; }
+#rendra.rd-compact .rd-fab { padding: 4px; opacity: .92; } #rendra.rd-compact .rd-fab .rd-av { width: 26px; height: 26px; font-size: 13px; }
+
+/* Jadwal per pertemuan & pemindahan */
+.week-ev .ev-no { font-size: 10px; font-weight: 700; color: var(--muted); }
+.week-ev.moved { outline: 1px dashed var(--amber); outline-offset: -1px; }
+.week-ev .ev-mv { color: var(--amber); font-weight: 700; }
+.ev-note { margin-top: 12px; padding: 8px 10px; background: var(--amber-soft); color: #6B4708; border-radius: var(--r-sm); font-size: 13px; display: flex; gap: 6px; align-items: flex-start; }
+.ev-note svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+.pl-sum { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pl-wrap { max-height: 52vh; overflow: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.table.pl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.table.pl th, .table.pl td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.table.pl th { position: sticky; top: 0; background: var(--sunk); font-size: 12px; color: var(--muted); }
+.table.pl .num { text-align: right; width: 36px; }
+.table.pl tr.pl-hol td { color: var(--faint); }
+.table.pl tr.pl-bad td { background: #FCF4F2; }
+.table.pl select { width: 100%; margin-top: 4px; font: 13px var(--font); padding: 5px 6px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
+.pl-cf { font-size: 12.5px; color: var(--red); }

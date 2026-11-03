@@ -195,8 +195,8 @@ async function main() {
     const skip = [`${period.start_date.slice(0, 4)}-12-25`, `${Number(period.start_date.slice(0, 4)) + 1}-01-01`]; // contoh hari libur
     let nKuliah = 0;
     for (const a of res.assignments) {
-      const rows = await c.q(`INSERT INTO events (room_id,title,event_type,start_at,end_at,unit_id,lecturer_id,participants,tt_run_id,tt_class_id,series_id,created_by)
-        SELECT $1,$2,'kuliah',(d::date + $3::time)::timestamptz,(d::date + $4::time)::timestamptz,$5,$6,$7,$8,$9,$10::uuid,$11
+      const rows = await c.q(`INSERT INTO events (room_id,title,event_type,start_at,end_at,unit_id,lecturer_id,participants,tt_run_id,tt_class_id,series_id,created_by,session_no)
+        SELECT $1,$2,'kuliah',(d::date + $3::time)::timestamptz,(d::date + $4::time)::timestamptz,$5,$6,$7,$8,$9,$10::uuid,$11,(row_number() OVER (ORDER BY d))::int
         FROM generate_series($12::date,$13::date,'1 day') d WHERE extract(isodow FROM d)=$14 AND NOT (d::date = ANY($15::date[]))
         ON CONFLICT DO NOTHING RETURNING id`,
       [a.room_id, `${a.course_code} ${a.course_name} (${a.class_name})`, a.start_time, a.end_time, unit.id, a.lecturer_id, a.size, run.id, a.class_id,
