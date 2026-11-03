@@ -12,11 +12,20 @@ const CON_TYPES = {
 const SCOPES = [['all', 'Semua kelas'], ['tags', 'MK dengan tag'], ['courses', 'Mata kuliah'], ['lecturer', 'Dosen'], ['groups', 'Rombel']];
 
 route(/^#\/penjadwalan$/, async (view, _, q) => {
-  const [periods, units, slots, cats] = await Promise.all([Ref.get('periods'), Ref.get('units'), Ref.get('slots'), Ref.get('categories')]);
+  // Periode & unit selalu diambil ulang agar data yang baru ditambahkan langsung terbaca
+  const [periods, units, slots, cats] = await Promise.all([Ref.get('periods', true), Ref.get('units', true), Ref.get('slots'), Ref.get('categories')]);
   const period = Number(q.period) || (periods.find(p => p.is_active) || periods[0] || {}).id;
   const unit = App.isSA() ? Number(q.unit) || (units[0] || {}).id : App.me.unit_id;
   const tab = q.tab || 'kelas';
-  if (!period || !unit) { view.innerHTML = App.head('Penjadwalan kuliah') + '<div class="empty">Buat periode akademik dan unit terlebih dahulu.</div>'; return; }
+  if (!period || !unit) {
+    const need = [];
+    if (!period) need.push(`<li>Periode akademik belum ada. ${App.isSA() ? '<a href="#/master/periode">Tambah periode akademik</a>' : 'Hubungi Super Admin.'}</li>`);
+    if (!unit) need.push(App.isSA()
+      ? '<li>Unit pengelola belum ada. <a href="#/unit">Tambah unit</a>, lalu tugaskan gedung/ruang ke unit tersebut.</li>'
+      : '<li>Akun Anda belum terhubung ke unit mana pun. Hubungi Super Admin.</li>');
+    view.innerHTML = App.head('Penjadwalan kuliah') + `<div class="empty">Sebelum menyusun jadwal, lengkapi dulu:<ul style="text-align:left;display:inline-block;margin-top:8px">${need.join('')}</ul></div>`;
+    return;
+  }
   view.innerHTML = App.head('Penjadwalan kuliah otomatis', 'Masukkan kelas, pilih ruang dan kendala, lalu biarkan algoritma genetika memetik menyusun jadwal tanpa bentrok untuk satu semester.') + `
     <div class="filters"><select id="per">${UI.options(periods.map(p => ({ value: p.id, label: p.name + (p.is_active ? ' (aktif)' : '') })), period)}</select>
       ${App.isSA() ? `<select id="un">${UI.options(units.map(u => ({ value: u.id, label: u.name })), unit)}</select>` : `<b>${esc(App.me.unit_name)}</b>`}</div>

@@ -44,7 +44,7 @@ class FloorPlan {
       <div class="fp-hint" hidden></div></div>`;
     this.host = host; this.svg = $('svg', host); this.w = $('.w', host); this.gR = $('.rooms', host); this.gO = $('.ov', host); this.hint = $('.fp-hint', host);
     $$('[data-z]', host).forEach(b => (b.onclick = () => (b.dataset.z === 'fit' ? this.fit() : this.zoom(b.dataset.z === 'in' ? 0.8 : 1.25))));
-    this.bindEvents(); this.setFloor({}); this.fit();
+    this.bindEvents(); this.fit(); this.setFloor({});
     if (this.o.mode === 'edit') this.setHint('Pilih alat Ruang persegi (R) lalu seret di kanvas. Poligon (P) untuk ruang berbentuk L.');
   }
   // ---------- tampilan ----------

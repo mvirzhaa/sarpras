@@ -58,12 +58,12 @@ r.get('/dashboard', ah(async (req, res) => {
   const trend = await db.q(`SELECT g::date AS "day", (SELECT count(*) FROM events e WHERE e.status='confirmed' AND e.start_at::date=g::date AND ${rf3}) events
     FROM generate_series(($1::date - 29)::timestamp, $1::date::timestamp, '1 day'::interval) g ORDER BY 1`, p3);
   const p4 = []; const rf4 = roomFilter(unitId, 'f.room_id', p4);
-  const fb = await db.one(`SELECT count(*) FILTER (WHERE status='baru') new, count(*) FILTER (WHERE status='diproses') process,
-      count(*) FILTER (WHERE created_at > now()-interval '30 days') month, round(avg(rating) FILTER (WHERE created_at > now()-interval '90 days'),2) rating
+  const fb = await db.one(`SELECT count(*) FILTER (WHERE status='baru') AS "new", count(*) FILTER (WHERE status='diproses') AS "process",
+      count(*) FILTER (WHERE created_at > now()-interval '30 days') AS "month", round(avg(rating) FILTER (WHERE created_at > now()-interval '90 days'),2) AS "rating"
     FROM feedbacks f WHERE ${rf4}`, p4);
   const p5 = []; const rf5 = roomFilter(unitId, 'd.room_id', p5);
-  const dmg = await db.one(`SELECT count(*) FILTER (WHERE status IN ('dilaporkan','diproses')) open, count(*) FILTER (WHERE status IN ('dilaporkan','diproses') AND severity='berat') severe,
-      round((avg(extract(epoch FROM resolved_at-reported_at)/86400) FILTER (WHERE resolved_at IS NOT NULL))::numeric,1) avg_days FROM room_damages d WHERE ${rf5}`, p5);
+  const dmg = await db.one(`SELECT count(*) FILTER (WHERE status IN ('dilaporkan','diproses')) AS "open", count(*) FILTER (WHERE status IN ('dilaporkan','diproses') AND severity='berat') AS "severe",
+      round((avg(extract(epoch FROM resolved_at-reported_at)/86400) FILTER (WHERE resolved_at IS NOT NULL))::numeric,1) AS "avg_days" FROM room_damages d WHERE ${rf5}`, p5);
   const p6 = []; const aw = unitId ? (p6.push(unitId), `(a.unit_id=$1 OR a.room_id IN (SELECT room_id FROM v_room_owner WHERE unit_id=$1))`) : 'TRUE';
   const assets = await db.one(`SELECT count(*) total, COALESCE(sum(a.price),0) value, COALESCE(sum(${BOOK}),0) book FROM assets a JOIN asset_codes ac ON ac.id=a.asset_code_id WHERE a.status='aktif' AND ${aw}`, p6);
   const cond = await db.q(`SELECT a.condition, count(*) n FROM assets a WHERE a.status='aktif' AND ${aw} GROUP BY 1`, p6);
@@ -103,7 +103,7 @@ async function buildReport(kind, req) {
   if (kind === 'harian') {
     const p = [...ev];
     S.push({ title: 'Daftar kegiatan', columns: [C('start', 'Mulai'), C('end', 'Selesai'), C('room', 'Ruang'), C('title', 'Kegiatan'), C('event_type', 'Jenis'), C('unit', 'Penyelenggara'), C('lecturer', 'Dosen')],
-      rows: await db.q(`SELECT to_char(e.start_at,'HH24:MI') start, to_char(e.end_at,'HH24:MI') "end", r.code room, e.title, e.event_type, u.name unit, pp.name lecturer
+      rows: await db.q(`SELECT to_char(e.start_at,'HH24:MI') "start", to_char(e.end_at,'HH24:MI') "end", r.code room, e.title, e.event_type, u.name unit, pp.name lecturer
         FROM events e JOIN rooms r ON r.id=e.room_id LEFT JOIN units u ON u.id=e.unit_id LEFT JOIN people pp ON pp.id=e.lecturer_id
         WHERE e.status='confirmed' AND e.start_at < $2::date AND e.end_at > $1::date AND ${roomFilter(unitId, 'e.room_id', p)} ORDER BY e.start_at, r.code`, p) });
   } else {
@@ -124,7 +124,7 @@ async function buildReport(kind, req) {
   {
     const p = [...ev], w = unitId ? (p.push(unitId), `(b.owner_unit_id=$3 OR b.requester_unit_id=$3)`) : 'TRUE';
     S.push({ title: 'Peminjaman ruang antar unit', columns: [C('code', 'No.'), C('date', 'Tanggal'), C('room', 'Ruang'), C('owner', 'Pengelola'), C('requester', 'Peminjam'), C('title', 'Kegiatan'), C('status', 'Status')],
-      rows: await db.q(`SELECT b.code, to_char(b.start_at,'DD/MM/YYYY HH24:MI') date, r.code room, ou.name owner, ru.name requester, b.title, b.status
+      rows: await db.q(`SELECT b.code, to_char(b.start_at,'DD/MM/YYYY HH24:MI') "date", r.code room, ou.name owner, ru.name requester, b.title, b.status
         FROM booking_requests b JOIN rooms r ON r.id=b.room_id LEFT JOIN units ou ON ou.id=b.owner_unit_id LEFT JOIN units ru ON ru.id=b.requester_unit_id
         WHERE b.start_at < $2::date AND b.end_at > $1::date AND ${w} ORDER BY b.start_at`, p) });
   }
@@ -145,14 +145,14 @@ async function buildReport(kind, req) {
   {
     const p = [...ev];
     S.push({ title: 'Kerusakan ruangan', columns: [C('date', 'Dilaporkan'), C('room', 'Ruang'), C('title', 'Kerusakan'), C('severity', 'Tingkat'), C('status', 'Status'), C('actual_cost', 'Biaya', 'money'), C('resolved', 'Selesai')],
-      rows: await db.q(`SELECT to_char(d.reported_at,'DD/MM/YYYY') date, r.code room, d.title, d.severity, d.status, d.actual_cost, to_char(d.resolved_at,'DD/MM/YYYY') resolved
+      rows: await db.q(`SELECT to_char(d.reported_at,'DD/MM/YYYY') "date", r.code room, d.title, d.severity, d.status, d.actual_cost, to_char(d.resolved_at,'DD/MM/YYYY') resolved
         FROM room_damages d JOIN rooms r ON r.id=d.room_id WHERE ((d.reported_at >= $1::date AND d.reported_at < $2::date) OR (d.resolved_at >= $1::date AND d.resolved_at < $2::date))
         AND ${roomFilter(unitId, 'd.room_id', p)} ORDER BY d.reported_at`, p) });
   }
   {
     const p = [...ev], aw = unitId ? (p.push(unitId), `(a.unit_id=$3 OR a.room_id IN (SELECT room_id FROM v_room_owner WHERE unit_id=$3))`) : 'TRUE';
     S.push({ title: 'Mutasi & perubahan aset', columns: [C('date', 'Waktu'), C('tag', 'Kode aset'), C('name', 'Nama'), C('action', 'Kegiatan'), C('from', 'Dari'), C('to', 'Ke'), C('note', 'Keterangan'), C('user', 'Petugas')],
-      rows: await db.q(`SELECT to_char(h.created_at,'DD/MM/YYYY HH24:MI') date, a.tag, a.name, h.action,
+      rows: await db.q(`SELECT to_char(h.created_at,'DD/MM/YYYY HH24:MI') "date", a.tag, a.name, h.action,
           concat_ws(' / ', fr.code, fh.name, h.from_condition) "from", concat_ws(' / ', tr.code, th.name, h.to_condition) "to", h.note, u.name "user"
         FROM asset_history h JOIN assets a ON a.id=h.asset_id LEFT JOIN rooms fr ON fr.id=h.from_room_id LEFT JOIN rooms tr ON tr.id=h.to_room_id
         LEFT JOIN people fh ON fh.id=h.from_holder_id LEFT JOIN people th ON th.id=h.to_holder_id LEFT JOIN users u ON u.id=h.user_id
@@ -168,7 +168,7 @@ async function buildReport(kind, req) {
           WHERE a.status='aktif' AND ${aw2} GROUP BY r.code, b.name ORDER BY b.name NULLS LAST, r.code`, p2) });
       const p3 = [...ev], aw3 = unitId ? (p3.push(unitId), 'a.unit_id=$3') : 'TRUE';
       S.push({ title: 'Perolehan aset baru', columns: [C('tag', 'Kode aset'), C('name', 'Nama'), C('date', 'Tgl perolehan'), C('method', 'Cara'), C('room', 'Ruang'), C('price', 'Harga', 'money')],
-        rows: await db.q(`SELECT a.tag, a.name, to_char(a.acquisition_date,'DD/MM/YYYY') date, a.acquisition_method method, r.code room, a.price
+        rows: await db.q(`SELECT a.tag, a.name, to_char(a.acquisition_date,'DD/MM/YYYY') "date", a.acquisition_method method, r.code room, a.price
           FROM assets a LEFT JOIN rooms r ON r.id=a.room_id WHERE a.created_at >= $1::date AND a.created_at < $2::date AND ${aw3} ORDER BY a.tag`, p3) });
     }
   }
@@ -187,7 +187,7 @@ async function buildReport(kind, req) {
   {
     const p = [...ev], w = unitId ? (p.push(unitId), 'b.unit_id=$3') : 'TRUE';
     S.push({ title: 'Berita acara yang terbit', columns: [C('number', 'Nomor'), C('date', 'Tanggal'), C('ba_type', 'Jenis'), C('title', 'Perihal'), C('status', 'Status')],
-      rows: await db.q(`SELECT b.number, to_char(b.ba_date,'DD/MM/YYYY') date, b.ba_type, b.title, b.status FROM berita_acara b
+      rows: await db.q(`SELECT b.number, to_char(b.ba_date,'DD/MM/YYYY') "date", b.ba_type, b.title, b.status FROM berita_acara b
         WHERE b.ba_date >= $1::date AND b.ba_date < $2::date AND ${w} ORDER BY b.ba_date`, p) });
   }
   const org = await db.one(`SELECT value FROM settings WHERE key='org'`);

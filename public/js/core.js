@@ -86,7 +86,7 @@ const I = (() => {
     undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3', redo: 'M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3', fit: 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5', copy: 'M8 8h12v12H8zM4 16V4h12',
     img: 'M4 5h16v14H4zM4 15l4-4 5 5 3-3 4 4M15 9h.01', trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3', save: 'M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7',
     zin: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5M11 8v6M8 11h6', zout: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5M8 11h6', check: 'M5 12l5 5 9-10',
-    ext: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6', layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5',
+    ext: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6', up: 'M12 20V8M7 13l5-5 5 5M5 4h14', sheet: 'M5 3h14v18H5zM5 9h14M5 15h14M11 3v18', layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5',
   };
   return (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${p[name] || p.doc}"/></svg>`;
 })();
@@ -229,6 +229,45 @@ const UI = {
       const bh = (v / mx) * h; return `<rect x="${i * bw + 1}" y="${h - bh}" width="${bw - 2}" height="${bh}" fill="var(--brand)" opacity=".8"><title>${esc(labels[i])}: ${v}</title></rect>`;
     }).join('')}<line x1="0" x2="${w}" y1="${h}" y2="${h}" stroke="var(--line-strong)"/>
     ${labels.map((l, i) => (i % 5 === 0 ? `<text x="${i * bw + bw / 2}" y="${h + 14}" font-size="11" fill="var(--muted)" text-anchor="middle">${esc(l)}</text>` : '')).join('')}</svg>`;
+  },
+};
+
+// ---------- Impor Excel data master ----------
+const Importer = {
+  // Tombol untuk header halaman
+  buttons: entity => `<a class="btn" href="${API.url(`/import/${entity}/template`)}" download>${I('dl')} Template Excel</a><button class="btn" data-import="${entity}">${I('up')} Impor Excel</button>`,
+  bind(view, entity, title, onDone) { const b = $(`[data-import="${entity}"]`, view); if (b) b.onclick = () => Importer.open(entity, title, onDone); },
+  open(entity, title, onDone) {
+    const m = UI.modal({ title: 'Impor ' + title.toLowerCase(), wide: true, body: `
+      <ol class="import-steps">
+        <li>Unduh template, isi sheet <b>Data</b> mulai baris 2. Kolom berwarna merah wajib diisi. Petunjuk, contoh, dan daftar kode yang valid ada di sheet lain.
+          <div class="btn-row" style="margin-top:8px"><a class="btn sm" href="${API.url(`/import/${entity}/template`)}" download>${I('dl')} Template kosong</a>
+          <a class="btn sm" href="${API.url(`/import/${entity}/template`, { data: 1 })}" download>${I('sheet')} Data saat ini (untuk diedit massal)</a></div></li>
+        <li>Pilih berkas yang sudah diisi (.xlsx atau .csv):
+          <input type="file" id="imp-file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" style="display:block;margin-top:8px"></li>
+      </ol>
+      <p class="muted" style="font-size:13px">Data dengan kunci yang sudah ada (kode, username, nama) diperbarui; selebihnya ditambahkan. Tidak ada data yang dihapus.
+        Bila ada baris yang salah, <b>tidak ada yang disimpan</b> dan semua kesalahan ditampilkan di bawah.</p>
+      <div id="imp-res"></div>`,
+    actions: [{ label: 'Tutup' }, { label: 'Impor', kind: 'primary', onClick: async () => {
+      const f = $('#imp-file', m.el).files[0], out = $('#imp-res', m.el);
+      if (!f) throw new Error('Pilih berkas terlebih dahulu');
+      const fd = new FormData(); fd.append('file', f);
+      out.innerHTML = '<p class="muted">Memproses…</p>';
+      const res = await fetch((API.base || '') + `/api/import/${entity}`, { method: 'POST', headers: { Authorization: 'Bearer ' + API.token }, body: fd });
+      const data = await res.json().catch(() => ({ error: 'Respons server tidak valid' }));
+      $('.form-error', m.body)?.remove();
+      if (res.status === 401) { App.logout(true); return false; }
+      if (!res.ok) {
+        out.innerHTML = `<div class="form-error">${esc(data.error || 'Impor gagal')}</div>` + (data.errors ? `<div style="max-height:320px;overflow:auto;margin-top:8px">${UI.table({ rows: data.errors,
+          columns: [{ label: 'Baris', num: true, key: 'row' }, { label: 'Kesalahan', render: e => esc(e.message) }] })}</div>` : '');
+        return false;
+      }
+      out.innerHTML = '';
+      UI.toast(`Impor selesai: ${data.inserted} ditambahkan, ${data.updated} diperbarui`);
+      onDone && onDone(data);
+    } }] });
+    return m;
   },
 };
 

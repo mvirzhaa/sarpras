@@ -1,15 +1,16 @@
 /* ===== Master data, unit, pengguna, pengaturan, audit, laporan ===== */
 'use strict';
-function crudPage({ path, title, lead, endpoint, columns, fields, canWrite = () => App.isSA(), filters = [], refKey }) {
+function crudPage({ path, title, lead, endpoint, columns, fields, canWrite = () => App.isSA(), filters = [], refKey, importKey }) {
   route(new RegExp('^#\\/' + path.replace('/', '\\/') + '$'), async (view, _, q) => {
     const res = await API.get(endpoint, { ...q, limit: 5000 }), rows = res.rows || res, w = canWrite() && App.canWrite();
     const fs = typeof fields === 'function' ? await fields() : fields;
-    view.innerHTML = App.head(title, lead, w ? `<button class="btn primary" id="add">${I('plus')} Tambah</button>` : '') +
+    view.innerHTML = App.head(title, lead, w ? (importKey ? Importer.buttons(importKey) : '') + `<button class="btn primary" id="add">${I('plus')} Tambah</button>` : '') +
       (filters.length ? `<div class="filters">${filters.map(f => f.type === 'search' ? `<input type="search" data-f="${f.name}" placeholder="${f.label}" value="${esc(q[f.name] || '')}">` : `<select data-f="${f.name}"><option value="">${f.label}</option>${UI.options(f.options, q[f.name])}</select>`).join('')}</div>` : '') +
       `<div class="panel">${UI.table({ rows, columns, rowAttr: r => (w ? `class="click" data-id="${r.id}"` : '') })}</div>`;
     bindFilters(view, '#/' + path, q);
     const done = () => { refKey && Ref.clear(refKey); App.render(); };
     if (!w) return;
+    if (importKey) Importer.bind(view, importKey, title, done);
     $('#add').onclick = () => UI.formModal({ title: 'Tambah ' + title.toLowerCase(), fields: fs, onSubmit: async v => { await API.post(endpoint, v); done(); } });
     view.onclick = e => {
       const tr = e.target.closest('[data-id]'); if (!tr) return;
@@ -21,29 +22,29 @@ function crudPage({ path, title, lead, endpoint, columns, fields, canWrite = () 
     };
   });
 }
-crudPage({ path: 'master/kategori', title: 'Kategori ruang', lead: 'Identitas jenis ruang. Warna dipakai di denah; "dapat dipinjam" menentukan ruang yang muncul di peminjaman, "penjadwalan kuliah" untuk algoritma.',
+crudPage({ path: 'master/kategori', importKey: 'categories', title: 'Kategori ruang', lead: 'Identitas jenis ruang. Warna dipakai di denah; "dapat dipinjam" menentukan ruang yang muncul di peminjaman, "penjadwalan kuliah" untuk algoritma.',
   endpoint: '/room-categories', refKey: 'categories',
   columns: [{ label: 'Kategori', render: c => `<i class="dot" style="background:${c.color}"></i><b>${esc(c.name)}</b>` }, { label: 'Dapat dipinjam', render: c => (c.bookable ? '✓' : '–') },
     { label: 'Penjadwalan kuliah', render: c => (c.schedulable ? '✓' : '–') }, { label: 'Urutan', num: true, key: 'sort' }, { label: 'Keterangan', key: 'description' }],
   fields: [{ name: 'name', label: 'Nama kategori', required: true }, { name: 'color', label: 'Warna di denah', type: 'color', default: '#8FA3A8' }, { name: 'sort', label: 'Urutan', type: 'number', default: 0 },
     { name: 'bookable', label: 'Dapat dipinjam / dijadwalkan kegiatan', type: 'checkbox', default: true }, { name: 'schedulable', label: 'Dipakai penjadwalan kuliah otomatis', type: 'checkbox' }, { name: 'description', label: 'Keterangan', type: 'textarea' }] });
-crudPage({ path: 'master/orang', title: 'Dosen & pegawai', lead: 'Dipakai sebagai dosen pengampu di penjadwalan dan pemegang aset.', endpoint: '/people', refKey: 'people', canWrite: () => App.canWrite(),
+crudPage({ path: 'master/orang', importKey: 'people', title: 'Dosen & pegawai', lead: 'Dipakai sebagai dosen pengampu di penjadwalan dan pemegang aset.', endpoint: '/people', refKey: 'people', canWrite: () => App.canWrite(),
   filters: [{ name: 'q', label: 'Cari nama / NIP / NIDN', type: 'search' }, { name: 'kind', label: 'Semua jenis', options: [['dosen', 'Dosen'], ['tendik', 'Tenaga kependidikan'], ['lainnya', 'Lainnya']].map(([a, b]) => ({ value: a, label: b })) }],
   columns: [{ label: 'Nama', render: p => `<b>${esc(p.name)}</b>` }, { label: 'NIP/NIDN', key: 'id_number' }, { label: 'Jenis', key: 'kind' }, { label: 'Jabatan', key: 'position' }, { label: 'Unit', key: 'unit_name' }, { label: 'Aktif', render: p => (p.active ? '✓' : '–') }],
   fields: async () => [{ name: 'name', label: 'Nama lengkap', required: true }, { name: 'id_number', label: 'NIP / NIDN / NIK' },
     { name: 'kind', label: 'Jenis', type: 'select', empty: false, options: [['dosen', 'Dosen'], ['tendik', 'Tenaga kependidikan'], ['lainnya', 'Lainnya']].map(([a, b]) => ({ value: a, label: b })) },
     { name: 'unit_id', label: 'Unit', type: 'select', options: await Ref.opts('units', u => u.name) }, { name: 'position', label: 'Jabatan' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'phone', label: 'Telepon' }, { name: 'active', label: 'Aktif', type: 'checkbox', default: true }] });
-crudPage({ path: 'master/matkul', title: 'Mata kuliah', lead: 'Tag dipakai pada kendala penjadwalan, mis. "matematika" agar diutamakan di jam awal.', endpoint: '/courses', canWrite: () => App.canWrite(),
+crudPage({ path: 'master/matkul', importKey: 'courses', title: 'Mata kuliah', lead: 'Tag dipakai pada kendala penjadwalan, mis. "matematika" agar diutamakan di jam awal.', endpoint: '/courses', canWrite: () => App.canWrite(),
   filters: [{ name: 'q', label: 'Cari kode / nama', type: 'search' }],
   columns: [{ label: 'Kode', render: c => `<b class="mono">${esc(c.code)}</b>` }, { label: 'Nama', key: 'name' }, { label: 'SKS', num: true, key: 'credits' }, { label: 'Semester', num: true, key: 'semester_level' },
     { label: 'Tag', render: c => (c.tags || []).map(t => `<span class="badge">${esc(t)}</span>`).join(' ') }, { label: 'Ruang disukai', key: 'category_name' }, { label: 'Unit', key: 'unit_name' }],
   fields: async () => [{ name: 'code', label: 'Kode MK', required: true }, { name: 'name', label: 'Nama MK', required: true }, { name: 'credits', label: 'SKS', type: 'number', default: 2 }, { name: 'semester_level', label: 'Semester', type: 'number' },
     { name: 'tags', label: 'Tag (pisahkan koma)', placeholder: 'matematika, praktikum' }, { name: 'unit_id', label: 'Unit/prodi', type: 'select', options: await Ref.opts('units', u => u.name) },
     { name: 'preferred_category_id', label: 'Kategori ruang yang disukai', type: 'select', options: await Ref.opts('categories', c => c.name) }] });
-crudPage({ path: 'master/periode', title: 'Periode akademik', lead: 'Penjadwalan kuliah dan laporan semester mengacu ke periode ini.', endpoint: '/periods', refKey: 'periods',
+crudPage({ path: 'master/periode', importKey: 'periods', title: 'Periode akademik', lead: 'Penjadwalan kuliah dan laporan semester mengacu ke periode ini.', endpoint: '/periods', refKey: 'periods',
   columns: [{ label: 'Periode', render: p => `<b>${esc(p.name)}</b> ${p.is_active ? '<span class="badge ok">aktif</span>' : ''}` }, { label: 'Mulai', render: p => fmt.date(p.start_date) }, { label: 'Selesai', render: p => fmt.date(p.end_date) }],
   fields: [{ name: 'name', label: 'Nama', required: true, placeholder: '2026/2027 Genap' }, { name: 'start_date', label: 'Mulai perkuliahan', type: 'date', required: true }, { name: 'end_date', label: 'Akhir perkuliahan', type: 'date', required: true }, { name: 'is_active', label: 'Jadikan periode aktif', type: 'checkbox' }] });
-crudPage({ path: 'master/sesi', title: 'Sesi kuliah', lead: 'Jam pelajaran. Sesi yang tidak bersambung (ada jeda istirahat) tidak akan digabung dalam satu kelas.', endpoint: '/time-slots', refKey: 'slots',
+crudPage({ path: 'master/sesi', importKey: 'slots', title: 'Sesi kuliah', lead: 'Jam pelajaran. Sesi yang tidak bersambung (ada jeda istirahat) tidak akan digabung dalam satu kelas.', endpoint: '/time-slots', refKey: 'slots',
   columns: [{ label: 'Sesi', num: true, key: 'slot_no' }, { label: 'Mulai', render: s => s.start_time.slice(0, 5) }, { label: 'Selesai', render: s => s.end_time.slice(0, 5) }],
   fields: [{ name: 'slot_no', label: 'Nomor sesi', type: 'number', required: true }, { name: 'start_time', label: 'Mulai', type: 'time', required: true }, { name: 'end_time', label: 'Selesai', type: 'time', required: true }] });
 
@@ -52,7 +53,7 @@ route(/^#\/unit$/, async view => {
   const [units, blds] = await Promise.all([API.get('/units').then(r => r.rows), Ref.get('buildings', true)]);
   const sa = App.isSA();
   view.innerHTML = App.head('Unit pengelola', 'Setiap unit otomatis memiliki akun admin. Akun aktif setelah Super Admin mengisi password. Tugaskan gedung atau ruang tertentu ke unit; penugasan per ruang mengalahkan penugasan per gedung.',
-    sa ? `<button class="btn primary" id="add">${I('plus')} Buat unit</button>` : '') +
+    sa ? Importer.buttons('units') + `<button class="btn primary" id="add">${I('plus')} Buat unit</button>` : '') +
     `<div class="panel">${UI.table({ rows: units, empty: 'Belum ada unit.', columns: [{ label: 'Unit', render: u => `<b>${esc(u.name)}</b><br><small class="mono">${esc(u.code)}</small>` },
       { label: 'Gedung / ruang dikelola', render: u => `${esc(u.buildings || '–')}<br><small>${u.room_count} ruang efektif</small>` }, { label: 'Pimpinan', render: u => esc(u.head_name || '–') },
       { label: 'Akun admin', render: u => `<span class="mono">${esc(u.admin_username || '–')}</span><br>${u.admin_active ? '<span class="badge ok">Aktif</span>' : u.admin_ready ? '<span class="badge warn">Nonaktif</span>' : '<span class="badge warn">Belum diisi</span>'}` },
@@ -61,6 +62,7 @@ route(/^#\/unit$/, async view => {
   const F = [{ name: 'code', label: 'Kode unit', required: true, placeholder: 'mis. FT, FEB, BAAK', help: 'Username admin: admin.<kode>' }, { name: 'name', label: 'Nama unit', required: true }, { name: 'head_name', label: 'Nama pimpinan unit' }, { name: 'head_nip', label: 'NIP pimpinan' },
     { name: 'email', label: 'Email unit', type: 'email' }, { name: 'phone', label: 'Telepon' }, { name: 'description', label: 'Keterangan', type: 'textarea' }];
   const done = () => { Ref.clear('units', 'rooms', 'myrooms'); App.render(); };
+  Importer.bind(view, 'units', 'Unit pengelola', done);
   $('#add').onclick = () => UI.formModal({ title: 'Buat unit pengelola', fields: F, onSubmit: async v => { const u = await API.post('/units', v); UI.toast(`Unit dibuat. Akun ${u.admin_username} menunggu password.`); done(); } });
   view.onclick = async e => {
     const ed = e.target.closest('[data-ed]'), adm = e.target.closest('[data-adm]'), asg = e.target.closest('[data-asg]');
@@ -87,13 +89,14 @@ route(/^#\/unit$/, async view => {
 route(/^#\/pengguna$/, async view => {
   const rows = (await API.get('/users')).rows, units = await Ref.opts('units', u => u.name);
   const ROLE = { superadmin: 'Super Admin', unit_admin: 'Admin unit', pimpinan: 'Pimpinan (lihat saja)' };
-  view.innerHTML = App.head('Pengguna', 'Akun admin utama unit dibuat otomatis bersama unit. Tambahkan operator unit atau akun pimpinan di sini.', `<button class="btn primary" id="add">${I('plus')} Tambah pengguna</button>`) +
+  view.innerHTML = App.head('Pengguna', 'Akun admin utama unit dibuat otomatis bersama unit. Tambahkan operator unit atau akun pimpinan di sini.', Importer.buttons('users') + `<button class="btn primary" id="add">${I('plus')} Tambah pengguna</button>`) +
     `<div class="panel">${UI.table({ rows, rowAttr: u => `class="click" data-u="${u.id}"`, columns: [{ label: 'Username', render: u => `<b class="mono">${esc(u.username)}</b>${u.is_unit_primary ? ' <span class="badge info">admin utama</span>' : ''}` },
       { label: 'Nama', key: 'name' }, { label: 'Peran', render: u => ROLE[u.role] }, { label: 'Unit', key: 'unit_name' }, { label: 'Status', render: u => (u.active ? badge('aktif') : u.has_password ? badge('nonaktif') : '<span class="badge warn">Belum ada password</span>') },
       { label: 'Masuk terakhir', render: u => (u.last_login_at ? fmt.rel(u.last_login_at) : '–') }] })}</div>`;
   const F = edit => [{ name: 'username', label: 'Username', required: true }, { name: 'name', label: 'Nama' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'phone', label: 'Telepon' },
     { name: 'role', label: 'Peran', type: 'select', empty: false, options: Object.entries(ROLE).map(([a, b]) => ({ value: a, label: b })) }, { name: 'unit_id', label: 'Unit (wajib untuk admin unit)', type: 'select', options: units },
     { name: 'password', label: edit ? 'Reset password (kosongkan bila tidak)' : 'Password awal', type: 'password', required: !edit }, { name: 'active', label: 'Aktif', type: 'checkbox', default: true }];
+  Importer.bind(view, 'users', 'Pengguna', () => App.render());
   $('#add').onclick = () => UI.formModal({ title: 'Tambah pengguna', fields: F(false), values: { role: 'unit_admin' }, onSubmit: async v => { await API.post('/users', v); App.render(); } });
   view.onclick = e => { const tr = e.target.closest('[data-u]'); if (!tr) return; const u = rows.find(x => x.id === Number(tr.dataset.u));
     const m = UI.formModal({ title: 'Ubah pengguna', fields: F(true), values: u, onSubmit: async v => { if (!v.password) delete v.password; await API.put('/users/' + u.id, v); App.render(); } });

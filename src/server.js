@@ -37,6 +37,7 @@ mainApp.use('/api', require('./routes/assets').router);
 mainApp.use('/api', require('./routes/inventory'));
 mainApp.use('/api', feedback.router);
 mainApp.use('/api', require('./routes/reports'));
+mainApp.use('/api', require('./routes/import'));
 mainApp.use('/api', (req, res) => res.status(404).json({ error: 'Endpoint tidak ditemukan' }));
 
 mainApp.use(express.static(path.join(__dirname, '../public'), { maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
@@ -71,7 +72,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   else if (err.code === '23503') { status = 409; msg = 'Data masih dipakai oleh data lain atau referensi tidak valid'; }
   else if (err.code === '23514' || err.code === '22P02' || err.code === '22007' || err.code === '22008') { status = 400; msg = 'Isian tidak valid: ' + (err.constraint || err.message); }
   else if (err.code === 'LIMIT_FILE_SIZE') { status = 413; msg = 'Berkas terlalu besar'; }
-  if (status >= 500 && !(err instanceof HttpError)) { console.error(err); if (process.env.NODE_ENV === 'production') msg = 'Terjadi kesalahan pada server'; }
+  if (status >= 500 && !(err instanceof HttpError)) { console.error(err); if (process.env.NODE_ENV === 'production') msg = 'Terjadi kesalahan pada server: ' + (err.message || ''); }
   res.status(status).json({ error: msg });
 });
 

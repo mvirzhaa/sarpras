@@ -15,7 +15,11 @@ npm install
 npm run db:init               # membuat skema + data awal (aman dijalankan ulang)
 npm start                     # http://localhost:3000
 npm run test:ga               # uji algoritma penjadwalan dengan data sintetis
+npm run db:seed-demo          # (opsional) data contoh: gedung 2 lantai + denah + jadwal kuliah semester aktif
+npm run db:seed-demo -- --reset   # hapus data contoh (hanya data berkode DEMO)
 ```
+
+**Data contoh** (`db/seed-demo.js`) membuat unit *Fakultas Teknik (Contoh)* (akun `admin.ftdemo` / `adminft123`), *Gedung Fakultas Teknik (Contoh)* 2 lantai dengan 21 ruang berdenah, 8 dosen, 15 mata kuliah, 20 kelas pada periode aktif, lalu menjalankan algoritma penjadwalan dan mempublikasikan hasilnya ke jadwal ruang selama satu semester, ditambah rapat rutin, seminar, sidang, dan satu ajuan peminjaman. Semua kode memakai penanda DEMO sehingga tidak bercampur dengan data asli.
 
 Masuk dengan `superadmin` / password dari `ADMIN_PASSWORD` (default `admin123`); sistem meminta ganti password saat pertama masuk.
 
@@ -76,6 +80,12 @@ Pengelola efektif sebuah ruang ditentukan view `v_room_owner`: penugasan per rua
 - Portal publik: pilih unit → pilih ruang → kirim saran/keluhan/kerusakan/apresiasi, nilai bintang, foto; nomor tiket untuk melacak tanggapan. QR pintu ruang langsung membuka formulir ruang tersebut.
 - Catatan kerusakan per ruang dari laporan internal, aset rusak, atau masukan publik; status ruang otomatis kembali aktif setelah semua kerusakan selesai.
 
+**Impor Excel data master** (`src/routes/import.js`)
+- Menu Unit pengelola, Pengguna, Kategori ruang, Dosen & pegawai, Mata kuliah, Periode akademik, dan Sesi kuliah memiliki tombol **Template Excel** dan **Impor Excel** (.xlsx atau .csv, pemisah koma atau titik koma).
+- Template berisi sheet *Data* (judul kolom, kolom wajib berwarna merah, keterangan di tiap judul, daftar pilihan), *Petunjuk*, *Contoh*, dan *Referensi* (kode unit/gedung/kategori yang valid saat ini). Tersedia juga unduhan *data saat ini* untuk edit massal lalu impor ulang.
+- Kunci pencocokan: kode unit, username, nama kategori, NIP/NIDN (atau nama), kode MK, nama periode, nomor sesi. Kunci yang sudah ada diperbarui, selebihnya ditambahkan; tidak ada data yang dihapus.
+- Impor bersifat utuh: bila ada satu baris salah, tidak ada yang disimpan dan semua kesalahan ditampilkan per baris. Admin unit hanya dapat mengimpor dosen dan mata kuliah untuk unitnya sendiri.
+
 **Dashboard & laporan**
 - Dashboard: ruang terpakai sekarang, utilisasi hari ini/7 hari, tren 30 hari, ruang tersibuk & paling jarang dipakai, kondisi & nilai aset, keluhan terbanyak, rata-rata waktu perbaikan.
 - Laporan **harian, bulanan, semester**: utilisasi per ruang, kegiatan, rekap per unit penyelenggara (termasuk pemakaian ruang unit lain), beban mengajar dosen, peminjaman, masukan/keluhan, kerusakan, mutasi & perubahan aset, posisi & valuasi aset per ruang, perolehan baru, persediaan, berita acara. Cetak atau unduh Excel (satu sheet per bagian).
@@ -86,10 +96,11 @@ Pengelola efektif sebuah ruang ditentukan view `v_room_owner`: penugasan per rua
 ```
 db/schema.sql            skema lengkap (tabel, indeks, constraint, view)
 db/init.js               inisialisasi & data awal
+db/seed-demo.js          data contoh gedung + denah + jadwal (opsional)
 src/server.js            Express, keamanan (helmet/CSP), penanganan galat
 src/auth.js              JWT, peran, lingkup ruang per unit
 src/routes/*.js          core (auth, user, unit, master, file), buildings, schedule,
-                         timetable, assets, inventory, feedback, reports
+                         timetable, assets, inventory, feedback, reports, import
 src/services/ga.js       algoritma penjadwalan (+ ga-worker.js)
 public/                  SPA (index.html), portal.html, a.html, css, js
 test/ga.test.js          uji algoritma

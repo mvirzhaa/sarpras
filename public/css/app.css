@@ -246,3 +246,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 .choice label:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
 .stars { display: flex; gap: 4px; } .stars button { font-size: 26px; background: none; border: 0; cursor: pointer; color: var(--line-strong); padding: 0 2px; line-height: 1; }
 .stars button.on { color: var(--amber); }
+
+/* Impor Excel */
+.import-steps { margin: 0 0 12px 20px; display: grid; gap: 14px; }
+.import-steps li { padding-left: 4px; }
