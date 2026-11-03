@@ -86,7 +86,7 @@ const I = (() => {
     undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3', redo: 'M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3', fit: 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5', copy: 'M8 8h12v12H8zM4 16V4h12',
     img: 'M4 5h16v14H4zM4 15l4-4 5 5 3-3 4 4M15 9h.01', trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3', save: 'M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7',
     zin: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5M11 8v6M8 11h6', zout: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5M8 11h6', check: 'M5 12l5 5 9-10',
-    ext: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6', up: 'M12 20V8M7 13l5-5 5 5M5 4h14', sheet: 'M5 3h14v18H5zM5 9h14M5 15h14M11 3v18', layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5',
+    ext: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6', up: 'M12 20V8M7 13l5-5 5 5M5 4h14', send: 'M4 12L20 4l-6 16-3-7zM11 13l9-9', sheet: 'M5 3h14v18H5zM5 9h14M5 15h14M11 3v18', layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5',
   };
   return (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${p[name] || p.doc}"/></svg>`;
 })();
@@ -311,6 +311,7 @@ const App = {
     if (!API.token) return App.loginView();
     try { App.me = await API.get('/auth/me'); } catch { return; }
     App.shell();
+    if (typeof Rendra !== 'undefined') Rendra.mount();
     window.addEventListener('hashchange', () => App.render());
     App.render();
     if (App.me.must_change_password) setTimeout(() => Pages.password(true), 300);

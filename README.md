@@ -30,6 +30,8 @@ Urutan penyiapan yang disarankan:
 4. **Unit pengelola**: buat unit (akun admin dibuat otomatis), isi password akun, tugaskan gedung/ruang.
 5. **Kodefikasi BMN**: impor tabel kodefikasi resmi via CSV, lalu daftarkan aset.
 
+Halaman HTML tidak di-cache browser, dan file JS/CSS diberi nomor versi otomatis dari isinya. Jadi setelah file diperbarui dan server di-restart, pengguna langsung mendapat versi baru.
+
 Untuk produksi: jalankan di belakang reverse proxy HTTPS (wajib agar kamera untuk scan QR berfungsi), gunakan `pm2`/systemd, set `NODE_ENV=production`, dan cadangkan basis data serta folder `uploads/`.
 
 ## Peran pengguna
@@ -86,6 +88,15 @@ Pengelola efektif sebuah ruang ditentukan view `v_room_owner`: penugasan per rua
 - Kunci pencocokan: kode unit, username, nama kategori, NIP/NIDN (atau nama), kode MK, nama periode, nomor sesi. Kunci yang sudah ada diperbarui, selebihnya ditambahkan; tidak ada data yang dihapus.
 - Impor bersifat utuh: bila ada satu baris salah, tidak ada yang disimpan dan semua kesalahan ditampilkan per baris. Admin unit hanya dapat mengimpor dosen dan mata kuliah untuk unitnya sendiri.
 
+**Asisten Rendra** (`src/services/rendra.js`, `public/js/rendra.js`)
+- Tombol **Tanya Rendra** di pojok kanan bawah setiap halaman setelah login.
+- Mencarikan ruang kosong dari kalimat biasa: tanggal (*besok*, *Senin depan*, *12 November*, *15/11*), jam (*jam 9 sampai 11*, *13.00–15.00*, *jam 2 siang*, *sore*, *selama 2 jam*), kapasitas (*untuk 40 orang*), kategori (*lab*, *aula*, *ruang rapat*), gedung, dan kegiatan berulang (*tiap Senin … sampai 30 November*, *selama 8 pekan*, *satu semester*). Pertanyaan lanjutan (*kalau jam 1?*, *semua kategori*) memakai filter sebelumnya.
+- Mengecek ruang tertentu (*apakah ruang 105 kosong Senin depan jam 9?*) beserta kegiatan yang memakainya.
+- Hasil tampil sebagai kartu dengan tombol **Buat kegiatan** (ruang unit sendiri) atau **Ajukan pinjam** (ruang unit lain). Hasil memakai query yang sama dengan menu Cari ruang kosong.
+- Menjawab cara memakai fitur dari basis pengetahuan `src/services/rendra-kb.js` (27 topik; sunting berkas ini bila menu berubah), dengan memperhatikan peran pengguna.
+- **Mode dasar** (bawaan) berjalan tanpa layanan luar. **Mode AI** aktif bila `ANTHROPIC_API_KEY` diisi: percakapan lebih luwes memakai Claude, tetapi data ruang tetap diambil dari basis data aplikasi lewat alat yang sama, dan hanya membaca. Bila layanan AI gagal, Rendra otomatis kembali ke mode dasar.
+- Pengaturan `.env` opsional: `ANTHROPIC_API_KEY`, `RENDRA_MODEL` (bawaan `claude-haiku-5-5`), `RENDRA_AI=off`, `RENDRA_RATE_PER_MIN` (bawaan 20 pesan/menit per pengguna).
+
 **Dashboard & laporan**
 - Dashboard: ruang terpakai sekarang, utilisasi hari ini/7 hari, tren 30 hari, ruang tersibuk & paling jarang dipakai, kondisi & nilai aset, keluhan terbanyak, rata-rata waktu perbaikan.
 - Laporan **harian, bulanan, semester**: utilisasi per ruang, kegiatan, rekap per unit penyelenggara (termasuk pemakaian ruang unit lain), beban mengajar dosen, peminjaman, masukan/keluhan, kerusakan, mutasi & perubahan aset, posisi & valuasi aset per ruang, perolehan baru, persediaan, berita acara. Cetak atau unduh Excel (satu sheet per bagian).
@@ -102,6 +113,7 @@ src/auth.js              JWT, peran, lingkup ruang per unit
 src/routes/*.js          core (auth, user, unit, master, file), buildings, schedule,
                          timetable, assets, inventory, feedback, reports, import
 src/services/ga.js       algoritma penjadwalan (+ ga-worker.js)
+src/services/rendra*.js  asisten Rendra & basis pengetahuannya
 public/                  SPA (index.html), portal.html, a.html, css, js
 test/ga.test.js          uji algoritma
 ```

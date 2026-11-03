@@ -101,9 +101,8 @@ r.delete('/events/:id', ah(async (req, res) => {
 }));
 
 // ---------------- Cari ruang kosong (lintas unit) ----------------
-r.get('/availability', ah(async (req, res) => {
-  const { start_at, end_at, capacity, category_id, building_id, repeat_until } = req.query;
-  if (!start_at || !end_at) fail(400, 'Tentukan waktu mulai dan selesai');
+// Dipakai juga oleh asisten Rendra (src/services/rendra.js)
+async function findFreeRooms(user, { start_at, end_at, capacity, category_id, building_id, repeat_until }) {
   const occ = occurrences(start_at, end_at, repeat_until);
   const p = [Number(capacity) || 0], w = ['c.bookable', `r.status='aktif'`, 'r.capacity >= $1'];
   if (category_id) { p.push(category_id); w.push(`r.category_id=$${p.length}`); }
@@ -115,8 +114,13 @@ r.get('/availability', ah(async (req, res) => {
     LEFT JOIN v_room_owner o ON o.room_id=r.id LEFT JOIN units u ON u.id=o.unit_id
     WHERE ${w.join(' AND ')} AND NOT EXISTS (SELECT 1 FROM events e WHERE e.room_id=r.id AND e.status='confirmed'
       AND tstzrange(e.start_at,e.end_at) && ANY(ARRAY[${ranges.join(',')}]))
-    ORDER BY (o.unit_id = ${Number(req.user.unit_id) || 0}) DESC, r.capacity, b.code, r.code LIMIT 200`, p);
-  res.json(rows.map(x => ({ ...x, mine: isSA(req.user) || x.owner_unit_id === req.user.unit_id })));
+    ORDER BY (o.unit_id = ${Number(user.unit_id) || 0}) DESC, r.capacity, b.code, r.code LIMIT 200`, p);
+  return rows.map(x => ({ ...x, mine: isSA(user) || x.owner_unit_id === user.unit_id }));
+}
+r.get('/availability', ah(async (req, res) => {
+  const { start_at, end_at } = req.query;
+  if (!start_at || !end_at) fail(400, 'Tentukan waktu mulai dan selesai');
+  res.json(await findFreeRooms(req.user, req.query));
 }));
 
 // ---------------- Peminjaman antar unit ----------------
@@ -212,4 +216,4 @@ r.get('/schedule/grid', ah(async (req, res) => {
   res.json({ date, rooms, events, slots, operational: op ? op.value : { start: '07:00', end: '21:00' } });
 }));
 
-module.exports = { router: r, occurrences };
+module.exports = { router: r, occurrences, findFreeRooms };

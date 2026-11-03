@@ -2,6 +2,8 @@ require('dotenv').config();
 process.env.TZ = process.env.TZ || 'Asia/Jakarta';
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { HttpError } = require('./util');
@@ -38,10 +40,8 @@ mainApp.use('/api', require('./routes/inventory'));
 mainApp.use('/api', feedback.router);
 mainApp.use('/api', require('./routes/reports'));
 mainApp.use('/api', require('./routes/import'));
+mainApp.use('/api', require('./routes/rendra'));
 mainApp.use('/api', (req, res) => res.status(404).json({ error: 'Endpoint tidak ditemukan' }));
-
-mainApp.use(express.static(path.join(__dirname, '../public'), { maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
-mainApp.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 let rawBase = process.env.BASE_PATH || '';
 if (!rawBase && process.env.PUBLIC_URL) {
@@ -51,6 +51,34 @@ if (!rawBase && process.env.PUBLIC_URL) {
   } catch (_) {}
 }
 const basePath = (rawBase || '').replace(/\/+$/, '');
+
+// Halaman HTML tidak di-cache; file JS/CSS diberi nomor versi dari isinya, sehingga setelah
+// pembaruan aplikasi browser langsung memakai file baru (tanpa perlu Ctrl+Shift+R).
+const PUB = path.join(__dirname, '../public');
+const ASSET_VER = (() => {
+  const h = crypto.createHash('sha1');
+  for (const d of ['js', 'css']) for (const f of fs.readdirSync(path.join(PUB, d)).sort()) h.update(f).update(fs.readFileSync(path.join(PUB, d, f)));
+  return h.digest('hex').slice(0, 10);
+})();
+const page = file => {
+  let html = fs.readFileSync(path.join(PUB, file), 'utf8');
+  html = html.replace(/((?:src|href)=")(?:\.\/|\/)?((?:js|css)\/[^"?]+)"/g, (match, prefix, assetPath) => {
+    const fullPath = (basePath ? `${basePath}/` : '/') + assetPath;
+    return `${prefix}${fullPath}?v=${ASSET_VER}"`;
+  });
+  return (req, res) => {
+    res.set('Cache-Control', 'no-cache');
+    res.type('html').send(html);
+  };
+};
+
+mainApp.get(['/', '/index.html'], page('index.html'));
+mainApp.get('/portal.html', page('portal.html'));
+mainApp.get('/a.html', page('a.html'));
+mainApp.use(express.static(PUB, {
+  maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
+  setHeaders: (res, f) => { if (f.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); }
+}));
 
 if (basePath && basePath !== '/') {
   app.use((req, res, next) => {
