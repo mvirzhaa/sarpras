@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const db = require('./db');
+const { db } = require('./db');
 const { HttpError } = require('./util');
 const SECRET = process.env.JWT_SECRET || 'ganti-secret-ini';
 
