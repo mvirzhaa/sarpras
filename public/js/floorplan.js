@@ -24,20 +24,59 @@ const FPG = {
     return FPG.inside(FPG.center(a), b) || FPG.inside(FPG.center(b), a);
   },
   round: v => Math.round(v * 100) / 100,
+  // Peta tepi gambar latar (Sobel) untuk snap-to-edge saat menjiplak denah scan.
+  edges(img) {
+    const maxDim = 900, sc = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * sc)), h = Math.max(1, Math.round(img.naturalHeight * sc));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const gray = new Float32Array(w * h);
+    for (let i = 0, j = 0; j < gray.length; i += 4, j++) gray[j] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const vMag = new Uint8ClampedArray(w * h), hMag = new Uint8ClampedArray(w * h), mag = new Uint8ClampedArray(w * h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const gx = -gray[i - w - 1] + gray[i - w + 1] - 2 * gray[i - 1] + 2 * gray[i + 1] - gray[i + w - 1] + gray[i + w + 1];
+      const gy = -gray[i - w - 1] - 2 * gray[i - w] - gray[i - w + 1] + gray[i + w - 1] + 2 * gray[i + w] + gray[i + w + 1];
+      vMag[i] = Math.abs(gx) / 4; hMag[i] = Math.abs(gy) / 4; mag[i] = Math.hypot(gx, gy) / 4;
+    }
+    return { w, h, vMag, hMag, mag };
+  },
+  // Douglas-Peucker pada poligon TERTUTUP (dipecah jadi 2 rantai lewat titik terjauh agar stabil).
+  rdp(pts, eps) {
+    if (pts.length < 3) return pts;
+    const perp = (p, a, b) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+      if (len2 === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+      let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2; t = Math.max(0, Math.min(1, t));
+      return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+    };
+    const simplify = s => {
+      if (s.length < 3) return s;
+      let idx = 0, maxD = -1;
+      for (let i = 1; i < s.length - 1; i++) { const d = perp(s[i], s[0], s[s.length - 1]); if (d > maxD) { maxD = d; idx = i; } }
+      if (maxD > eps) return simplify(s.slice(0, idx + 1)).slice(0, -1).concat(simplify(s.slice(idx)));
+      return [s[0], s[s.length - 1]];
+    };
+    let splitIdx = 1, maxD = -1;
+    for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > maxD) { maxD = d; splitIdx = i; } }
+    const c1 = simplify(pts.slice(0, splitIdx + 1)), c2 = simplify(pts.slice(splitIdx).concat([pts[0]]));
+    return c1.slice(0, -1).concat(c2.slice(0, -1));
+  },
 };
 
 class FloorPlan {
   constructor(host, o) {
-    this.o = Object.assign({ mode: 'view', width: 60, height: 30, grid: 0.5, rooms: [], categories: [], bg: null, bgOpacity: 0.35, codePrefix: 'R-1',
+    this.o = Object.assign({ mode: 'view', width: 60, height: 30, grid: 0.5, rooms: [], categories: [], bg: null, bgOpacity: 0.35, edgeSnap: true, codePrefix: 'R-1',
       colorOf: null, subOf: null, onSelect: () => {}, onChange: () => {}, annotations: [] }, o);
     this.cat = new Map(this.o.categories.map(c => [Number(c.id), c]));
     this.rooms = this.o.rooms.map(r => ({ ...r, shape: typeof r.shape === 'string' ? JSON.parse(r.shape) : (r.shape || {}) })).filter(r => r.shape && r.shape.type);
     this.unplaced = this.o.rooms.filter(r => !r.shape || !r.shape.type);
     this.origIds = new Set(this.o.rooms.map(r => r.id));
-    this.sel = -1; this.tool = 'select'; this.undoS = []; this.redoS = []; this.drag = null; this.poly = null; this.ptrs = new Map(); this.tmp = 0; this.dirty = false;
+    this.sel = -1; this.tool = 'select'; this.undoS = []; this.redoS = []; this.drag = null; this.poly = null; this.ptrs = new Map(); this.tmp = 0; this.dirty = false; this.edge = null;
     this.lastCat = (this.o.categories.find(c => c.schedulable) || this.o.categories[0] || {}).id;
     host.innerHTML = `<div class="fp-canvas"><svg class="fp-svg" tabindex="0" aria-label="Denah lantai">
-        <g class="w"><image class="bg" preserveAspectRatio="xMinYMin meet" style="pointer-events:none"/><rect class="bounds" vector-effect="non-scaling-stroke"/>
+        <g class="w"><rect class="bounds" vector-effect="non-scaling-stroke"/><image class="bg" preserveAspectRatio="xMinYMin meet" style="pointer-events:none"/>
         <path class="grid-minor" fill="none" vector-effect="non-scaling-stroke"/><path class="grid-major" fill="none" vector-effect="non-scaling-stroke"/>
         <g class="rooms"></g><g class="ov"></g></g></svg>
       <div class="fp-zoom no-print"><button class="tool" data-z="in" aria-label="Perbesar">${I('zin')}</button><button class="tool" data-z="out" aria-label="Perkecil">${I('zout')}</button><button class="tool" data-z="fit" aria-label="Pas layar">${I('fit')}</button></div>
@@ -45,12 +84,14 @@ class FloorPlan {
     this.host = host; this.svg = $('svg', host); this.w = $('.w', host); this.gR = $('.rooms', host); this.gO = $('.ov', host); this.hint = $('.fp-hint', host);
     $$('[data-z]', host).forEach(b => (b.onclick = () => (b.dataset.z === 'fit' ? this.fit() : this.zoom(b.dataset.z === 'in' ? 0.8 : 1.25))));
     this.bindEvents(); this.fit(); this.setFloor({});
+    if (this.o.bg) this.loadEdges(this.o.bg);
     if (this.o.mode === 'edit') this.setHint('Pilih alat Ruang persegi (R) lalu seret di kanvas. Poligon (P) untuk ruang berbentuk L.');
   }
   // ---------- tampilan ----------
   setFloor({ width, height, grid, bg, bgOpacity }) {
     if (width) this.o.width = Number(width); if (height) this.o.height = Number(height); if (grid) this.o.grid = Number(grid);
-    if (bg !== undefined) this.o.bg = bg; if (bgOpacity !== undefined) this.o.bgOpacity = Number(bgOpacity);
+    if (bg !== undefined && bg !== this.o.bg) { this.o.bg = bg; this.loadEdges(bg); }
+    if (bgOpacity !== undefined) this.o.bgOpacity = Number(bgOpacity);
     const { width: W, height: H, grid: g } = this.o;
     const b = $('.bounds', this.svg); b.setAttribute('width', W); b.setAttribute('height', H);
     const im = $('.bg', this.svg);
@@ -77,6 +118,113 @@ class FloorPlan {
   px() { return this.vb ? this.vb.w / (this.svg.clientWidth || 800) : 0.05; } // meter per piksel
   pt(e) { const p = this.svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; const r = p.matrixTransform(this.w.getScreenCTM().inverse()); return [r.x, r.y]; }
   snap(v, e) { return e && e.altKey ? FPG.round(v) : Math.round(v / this.o.grid) * this.o.grid; }
+  loadEdges(src) {
+    this.edge = null;
+    if (!src) return;
+    const img = new Image();
+    img.onload = () => { this.edge = FPG.edges(img); };
+    img.src = src;
+  }
+  // Snap sebuah titik: utamakan tepi pada gambar latar (per sumbu), jatuh ke grid bila tak ada tepi di dekatnya.
+  snapPt(x, y, e) {
+    if (e && e.altKey) return [FPG.round(x), FPG.round(y)];
+    const r = this.o.edgeSnap && this.edge ? this.edgeNear(x, y) : {};
+    return [r.x ?? Math.round(x / this.o.grid) * this.o.grid, r.y ?? Math.round(y / this.o.grid) * this.o.grid];
+  }
+  edgeNear(x, y) {
+    const ed = this.edge, sxp = ed.w / this.o.width, syp = ed.h / this.o.height;
+    const tol = 16 * this.px(), Rx = Math.max(2, Math.round(tol * sxp)), Ry = Math.max(2, Math.round(tol * syp)), win = Math.max(2, Math.round(3 * Math.min(sxp, syp)));
+    const ex = Math.round(x * sxp), ey = Math.round(y * syp);
+    let bc = -1, bcs = 0;
+    for (let cx = Math.max(1, ex - Rx); cx <= Math.min(ed.w - 2, ex + Rx); cx++) {
+      let s = 0; for (let ry = Math.max(1, ey - win); ry <= Math.min(ed.h - 2, ey + win); ry++) s += ed.vMag[ry * ed.w + cx];
+      if (s > bcs) { bcs = s; bc = cx; }
+    }
+    let br = -1, brs = 0;
+    for (let cy = Math.max(1, ey - Ry); cy <= Math.min(ed.h - 2, ey + Ry); cy++) {
+      let s = 0; for (let rx = Math.max(1, ex - win); rx <= Math.min(ed.w - 2, ex + win); rx++) s += ed.hMag[cy * ed.w + rx];
+      if (s > brs) { brs = s; br = cy; }
+    }
+    const th = (2 * win + 1) * 35;
+    return { x: bc >= 0 && bcs > th ? FPG.round(bc / sxp) : undefined, y: br >= 0 && brs > th ? FPG.round(br / syp) : undefined };
+  }
+  // Isi area tertutup pada gambar latar (klik di dalamnya) jadi ruang poligon/persegi otomatis.
+  floodFill(sx, sy, thresh) {
+    const { w, h, mag } = this.edge;
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h || mag[sy * w + sx] >= thresh) return null;
+    const visited = new Uint8Array(w * h), stack = [sy * w + sx], maxCount = w * h * 0.4;
+    visited[sy * w + sx] = 1;
+    let count = 0;
+    while (stack.length) {
+      const idx = stack.pop(), x = idx % w, y = (idx / w) | 0;
+      count++;
+      if (count > maxCount) return { leaked: true };
+      if (x > 0 && !visited[idx - 1] && mag[idx - 1] < thresh) { visited[idx - 1] = 1; stack.push(idx - 1); }
+      if (x < w - 1 && !visited[idx + 1] && mag[idx + 1] < thresh) { visited[idx + 1] = 1; stack.push(idx + 1); }
+      if (y > 0 && !visited[idx - w] && mag[idx - w] < thresh) { visited[idx - w] = 1; stack.push(idx - w); }
+      if (y < h - 1 && !visited[idx + w] && mag[idx + w] < thresh) { visited[idx + w] = 1; stack.push(idx + w); }
+    }
+    return { mask: visited, count };
+  }
+  // Telusuri batas luar area terisi (teknik directed-edge: sisi piksel yang bertetangga dengan luar area).
+  traceBoundary(mask, w, h) {
+    const filled = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x];
+    const next = new Map(), key = (x, y) => x + ',' + y;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!filled(x, y)) continue;
+      if (!filled(x, y - 1)) next.set(key(x + 1, y), [x, y]);
+      if (!filled(x, y + 1)) next.set(key(x, y + 1), [x + 1, y + 1]);
+      if (!filled(x - 1, y)) next.set(key(x, y), [x, y + 1]);
+      if (!filled(x + 1, y)) next.set(key(x + 1, y + 1), [x + 1, y]);
+    }
+    const visited = new Set(); let best = null, bestArea = 0;
+    for (const startKey of next.keys()) {
+      if (visited.has(startKey)) continue;
+      const loop = []; let curKey = startKey, guard = 0;
+      while (!visited.has(curKey) && guard++ < next.size + 4) {
+        visited.add(curKey);
+        loop.push(curKey.split(',').map(Number));
+        const nxt = next.get(curKey); if (!nxt) break;
+        curKey = key(nxt[0], nxt[1]);
+      }
+      if (loop.length >= 3) { const area = FPG.area(loop); if (area > bestArea) { bestArea = area; best = loop; } }
+    }
+    return best;
+  }
+  // Garis/tepi pada foto atau scan bisa sangat bervariasi kekuatannya (kompresi JPEG, pencahayaan, dsb),
+  // jadi satu ambang tetap tidak cukup: coba dari yang paling sensitif, makin longgar selama area tidak
+  // melonjak tiba-tiba (indikasi bocor melewati garis tipis ke ruang/koridor sebelah).
+  wandAt(x, y) {
+    if (!this.edge) return UI.toast('Gambar latar belum siap (masih memuat tepi).', true);
+    const ed = this.edge, sxp = ed.w / this.o.width, syp = ed.h / this.o.height;
+    const px = Math.round(x * sxp), py = Math.round(y * syp);
+    const steps = [16, 22, 30, 40, 52, 66, 82], jumpRatio = 2, jumpMin = 120;
+    let best = null, triedAny = false, leaked = false;
+    for (const t of steps) {
+      const r = this.floodFill(px, py, t);
+      if (!r) continue;
+      triedAny = true;
+      if (r.leaked) { leaked = true; break; }
+      if (best && best.count >= jumpMin && r.count > best.count * jumpRatio) { leaked = true; break; }
+      if (r.count >= 25) best = r;
+    }
+    if (!best) {
+      if (!triedAny) return UI.toast('Titik ini tepat di garis. Klik di dalam area ruang.', true);
+      if (leaked) return UI.toast('Area tidak tertutup rapat (bocor ke luar). Gambar manual untuk area ini.', true);
+      return UI.toast('Area terdeteksi terlalu kecil. Coba titik lain.', true);
+    }
+    const r = best;
+    const loop = this.traceBoundary(r.mask, ed.w, ed.h);
+    if (!loop || loop.length < 3) return UI.toast('Gagal menelusuri batas area.', true);
+    const eps = Math.max(1.2, Math.min(ed.w, ed.h) * 0.003);
+    const simp = FPG.rdp(loop, eps);
+    if (simp.length < 3) return UI.toast('Gagal menyederhanakan bentuk area.', true);
+    const pts = simp.map(([qx, qy]) => [FPG.round(qx / sxp), FPG.round(qy / syp)]);
+    const bb = FPG.bbox(pts);
+    if (bb.w < this.o.grid || bb.h < this.o.grid) return UI.toast('Area terdeteksi terlalu kecil. Coba titik lain.', true);
+    const isRect = pts.length <= 5 && Math.abs(FPG.area(pts) - bb.w * bb.h) < 0.03 * bb.w * bb.h;
+    this.addRoom(isRect ? { type: 'rect', x: FPG.round(bb.x), y: FPG.round(bb.y), w: FPG.round(bb.w), h: FPG.round(bb.h) } : { type: 'poly', points: pts });
+  }
   color(r) { if (this.o.colorOf) return this.o.colorOf(r); const c = this.cat.get(Number(r.category_id)); return c ? c.color : '#B8C4C0'; }
   setHint(t) { this.hint.hidden = !t; this.hint.textContent = t || ''; }
   render() {
@@ -176,7 +324,7 @@ class FloorPlan {
   setTool(t) {
     this.tool = t; this.poly = null; this.renderOverlay();
     this.svg.style.cursor = t === 'pan' ? 'grab' : t === 'select' ? 'default' : 'crosshair';
-    this.setHint({ rect: 'Seret untuk menggambar ruang. Tahan Alt untuk menonaktifkan snap grid.', poly: 'Klik titik-titik sudut. Klik titik awal / Enter untuk menutup, Esc untuk batal. Shift = garis lurus.', pan: 'Seret untuk menggeser tampilan.', select: '' }[t] || '');
+    this.setHint({ rect: 'Seret untuk menggambar ruang. Tahan Alt untuk menonaktifkan snap grid.', poly: 'Klik titik-titik sudut. Klik titik awal / Enter untuk menutup, Esc untuk batal. Shift = garis lurus.', wand: 'Klik di dalam area ruang pada gambar latar untuk mengisinya jadi ruang otomatis.', pan: 'Seret untuk menggeser tampilan.', select: '' }[t] || '');
   }
   bindEvents() {
     const S = this.svg;
@@ -201,6 +349,7 @@ class FloorPlan {
       else if (!ctrl && k === 'v') this.o.onTool && this.o.onTool('select');
       else if (!ctrl && k === 'r') this.o.onTool && this.o.onTool('rect');
       else if (!ctrl && k === 'p') this.o.onTool && this.o.onTool('poly');
+      else if (!ctrl && k === 'w' && this.edge) this.o.onTool && this.o.onTool('wand');
       else if (!ctrl && k === 'h') this.o.onTool && this.o.onTool('pan');
       else if (k.startsWith('arrow') && this.sel >= 0) {
         e.preventDefault(); const st = this.o.grid * (e.shiftKey ? 5 : 1);
@@ -220,9 +369,10 @@ class FloorPlan {
     const [x, y] = this.pt(e), room = e.target.closest('[data-i]'), handle = e.target.closest('[data-h]');
     if (e.button === 1 || this.space || this.tool === 'pan') return this.startPan(e);
     if (this.o.mode !== 'edit') { this.drag = { kind: 'pan', cx: e.clientX, cy: e.clientY, vb: { ...this.vb }, room: room ? Number(room.dataset.i) : -1, moved: false }; return; }
-    if (this.tool === 'rect') { const sx = this.snap(x, e), sy = this.snap(y, e); this.drag = { kind: 'draw', x0: sx, y0: sy, x1: sx, y1: sy }; return; }
+    if (this.tool === 'rect') { const [sx, sy] = this.snapPt(x, y, e); this.drag = { kind: 'draw', x0: sx, y0: sy, x1: sx, y1: sy }; return; }
+    if (this.tool === 'wand') { this.wandAt(x, y); this.o.onTool && this.o.onTool('select'); return; }
     if (this.tool === 'poly') {
-      let p = [this.snap(x, e), this.snap(y, e)];
+      let p = this.snapPt(x, y, e);
       if (!this.poly) this.poly = { points: [] };
       const pts = this.poly.points;
       if (e.shiftKey && pts.length) p = this.ortho(pts[pts.length - 1], p);
@@ -239,7 +389,7 @@ class FloorPlan {
   move(e) {
     if (this.ptrs.has(e.pointerId)) this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const d = this.drag;
-    if (this.poly && this.tool === 'poly') { const [x, y] = this.pt(e); let p = [this.snap(x, e), this.snap(y, e)]; const pts = this.poly.points; if (e.shiftKey && pts.length) p = this.ortho(pts[pts.length - 1], p); this.poly.cursor = p; this.renderOverlay(); }
+    if (this.poly && this.tool === 'poly') { const [x, y] = this.pt(e); let p = this.snapPt(x, y, e); const pts = this.poly.points; if (e.shiftKey && pts.length) p = this.ortho(pts[pts.length - 1], p); this.poly.cursor = p; this.renderOverlay(); }
     if (!d) return;
     if (d.kind === 'pinch' && this.ptrs.size === 2) {
       const [a, b] = [...this.ptrs.values()], nd = Math.hypot(a.x - b.x, a.y - b.y);
@@ -251,7 +401,7 @@ class FloorPlan {
       this.vb = { ...d.vb, x: d.vb.x - dx * k, y: d.vb.y - dy * k }; this.svg.setAttribute('viewBox', `${this.vb.x} ${this.vb.y} ${this.vb.w} ${this.vb.h}`); return;
     }
     const [x, y] = this.pt(e);
-    if (d.kind === 'draw') { d.x1 = this.snap(x, e); d.y1 = this.snap(y, e); this.renderOverlay(); return; }
+    if (d.kind === 'draw') { [d.x1, d.y1] = this.snapPt(x, y, e); this.renderOverlay(); return; }
     const r = this.rooms[this.sel]; if (!r) return;
     if (d.kind === 'move') {
       const dx = this.snap(x - d.x0, e), dy = this.snap(y - d.y0, e);
@@ -259,7 +409,7 @@ class FloorPlan {
       r.shape = JSON.parse(JSON.stringify(d.orig)); this.translate(r.shape, dx, dy); this.render(); return;
     }
     if (d.kind === 'handle') {
-      const s = JSON.parse(JSON.stringify(d.orig)), sx = this.snap(x, e), sy = this.snap(y, e), g = this.o.grid;
+      const s = JSON.parse(JSON.stringify(d.orig)), [sx, sy] = this.snapPt(x, y, e), g = this.o.grid;
       if (d.h.startsWith('v')) { s.points[Number(d.h.slice(1))] = [sx, sy]; }
       else {
         let x1 = s.x, y1 = s.y, x2 = s.x + s.w, y2 = s.y + s.h;

@@ -14,12 +14,14 @@ cp .env.example .env          # sesuaikan DATABASE_URL, JWT_SECRET, PUBLIC_URL
 npm install
 npm run db:init               # membuat skema + data awal (aman dijalankan ulang)
 npm start                     # http://localhost:3000
-npm run test:ga               # uji algoritma penjadwalan dengan data sintetis
+npm run db:demo               # (opsional) data uji coba: unit Prodi TI, gedung contoh 2 lantai, contoh kelas & dosen
 npm run db:seed-demo          # (opsional) data contoh: gedung 2 lantai + denah + jadwal kuliah semester aktif
 npm run db:seed-demo -- --reset   # hapus data contoh (hanya data berkode DEMO)
+npm run test:ga               # uji algoritma penjadwalan dengan data sintetis
+node test/sample.test.js      # uji contoh data penjadwalan terhadap gedung contoh
 ```
 
-**Data contoh** (`db/seed-demo.js`) membuat unit *Fakultas Teknik (Contoh)* (akun `admin.ftdemo` / `adminft123`), *Gedung Fakultas Teknik (Contoh)* 2 lantai dengan 21 ruang berdenah, 8 dosen, 15 mata kuliah, 20 kelas pada periode aktif, lalu menjalankan algoritma penjadwalan dan mempublikasikan hasilnya ke jadwal ruang selama satu semester, ditambah rapat rutin, seminar, sidang, dan satu ajuan peminjaman. Semua kode memakai penanda DEMO sehingga tidak bercampur dengan data asli.
+**Data contoh** (`db/seed-demo.js` dan `db/demo.js`) menyediakan data uji coba untuk demonstrasi dan evaluasi fitur.
 
 Masuk dengan `superadmin` / password dari `ADMIN_PASSWORD` (default `admin123`); sistem meminta ganti password saat pertama masuk.
 
@@ -66,21 +68,25 @@ Pengelola efektif sebuah ruang ditentukan view `v_room_owner`: penugasan per rua
 - Kolom baru di tabel `events` (`session_no`, `orig_room_id`, `orig_start_at`, `change_note`) ditambahkan otomatis saat server mulai (`src/migrate.js`).
 
 **Penjadwalan kuliah otomatis** (`src/services/ga.js`)
+- Data kelas dapat diisi manual, disalin dari semester lain, atau **diimpor dari Excel** (`src/services/tt-excel.js`, template berisi sheet Dosen, Mata Kuliah, Kelas, Kendala, dengan daftar pilihan; tersedia versi berisi contoh data). Impor didahului pratinjau (dry run) yang menampilkan jumlah data baru/diperbarui dan validasi kesalahan per baris.
+- Sesi kuliah dapat dibuat otomatis (`Pages.slotGenerator`): cukup isi jumlah sesi, jam mulai, durasi per sesi, jeda antarsesi (otomatis mendeteksi sesi bersambung jika jeda <= 15 menit), dan istirahat.
 - Input: kelas per semester (MK, rombel, dosen, jumlah mahasiswa, durasi sesi, pertemuan/pekan, kategori/ruang wajib), cakupan ruang (semua ruang unit / kategori tertentu / ruang pilihan / seluruh kampus), hari & sesi, serta kendala.
 - Kendala keras: bentrok ruang, dosen, rombel; kapasitas & kategori ruang; jadwal berulang unit lain di ruang yang sama; kendala waktu bertanda *wajib*.
 - Kendala lunak berbobot: MK bertag tertentu diutamakan pagi/sore, dosen hanya/tidak bisa hari/sesi tertentu, larangan waktu (mis. salat Jumat), batas kelas dosen per hari, kepadatan jadwal rombel, sebaran pertemuan, kecocokan kapasitas.
 - Algoritma: *memetic genetic algorithm* — domain dipangkas di awal, inisialisasi greedy *most-constrained-first*, seleksi turnamen, *uniform crossover* per kelas, mutasi, dan *local search* terarah konflik dengan evaluasi berbasis tabel okupansi typed-array. Berjalan di `worker_threads` agar server tetap responsif. Uji internal: 320 sesi, 30 ruang, 0 bentrok dalam < 1 detik.
 - Hasil dapat dilihat per ruang/dosen/rombel, diedit manual, diunduh CSV, lalu **dipublikasikan** ke jadwal ruang untuk seluruh semester dengan pengecualian tanggal libur/UTS/UAS. Publikasi ulang mengganti hasil sebelumnya.
 
-**Aset**
+**Aset Tetap & Aset Lancar (Persediaan)** (`src/routes/fixed.js`, `src/routes/stock.js`, `public/js/pages-inventory.js`)
+- **Aset Tetap**: Pengadaan/pembelian massal (`asset_acquisitions`), penomoran dokumen, pencatatan vendor & sumber dana; Pemakaian / pinjam pakai (`asset_loans`, `asset_loan_items`) antarunit/perorangan dengan tanggal kembali, kondisi serah & kembali, serta Berita Acara otomatis.
+- **Aset Lancar (Persediaan)**: Dokumen stok (`stock_docs`, `stock_doc_items`) untuk pembelian, pemakaian ruangan/perorangan, dan stock opname fisik persediaan.
+- **Masuk Sebagai (Impersonation)**: Super Admin dapat "Masuk sebagai" admin unit tertentu dari menu Unit Pengelola atau Pengguna (token berdurasi 2 jam, pita penanda atas, seluruh aktivitas diaudit dengan identitas Super Admin asal).
 - Kodefikasi 5 level (Golongan › Bidang › Kelompok › Sub Kelompok › Sub-sub Kelompok) dengan impor CSV. Data awal hanya contoh; impor dan verifikasi tabel kodefikasi resmi yang berlaku.
 - Registrasi aset (bisa banyak unit sekaligus), NUP otomatis per kode, kode aset = kode barang + NUP, QR per aset.
 - Kondisi: baru, baik, rusak, diperbaiki, rusak parah. Riwayat perbaikan dengan biaya.
-- **Kartu riwayat inventaris**: registrasi, mutasi ruang/pemegang/antar unit, perubahan kondisi, perbaikan, opname, penghapusan.
+- **Kartu riwayat inventaris**: registrasi, mutasi ruang/pemegang/antar unit, perubahan kondisi, perbaikan, opname, peminjaman/pemakaian, penghapusan.
 - Mutasi dengan dokumen penyerta opsional dan berita acara otomatis.
 - Stock opname dengan pemindaian QR kamera (BarcodeDetector, cadangan jsQR), hasil diterapkan ke data dan berita acara otomatis.
 - Penghapusan aset (status, bukan hapus data) dengan berita acara.
-- Barang persediaan/habis pakai: stok, stok minimum, transaksi masuk/keluar/penyesuaian, BA serah terima.
 - **Penyusutan aset tetap** metode garis lurus (fungsi SQL `asset_dep()`): periode bulanan/semesteran/tahunan, konvensi awal penyusutan, nilai minimum kapitalisasi, nilai sisa, golongan yang tidak disusutkan (default: persediaan, tanah, KDP), masa manfaat diwarisi dari kodefikasi, berhenti saat aset dihapuskan. Tersedia panel & jadwal penyusutan per aset dan **Laporan Penyusutan** (ringkasan per bidang, rincian per aset dengan beban periode berjalan & akumulasi, daftar aset tidak disusutkan). Kebijakan diatur di Pengaturan › Organisasi dan sebaiknya disesuaikan dengan kebijakan akuntansi/regulasi yang berlaku.
 - Valuasi per ruang, pemegang, gedung, unit, dan bidang barang: nilai perolehan, akumulasi penyusutan, dan nilai buku.
 - Cetak label QR (kertas stiker A4) dan berita acara siap cetak dengan penanda tangan.

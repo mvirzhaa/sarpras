@@ -17,6 +17,7 @@ async function nextNumber(c, prefix, date = new Date()) {
 const ticket = () => (Math.random().toString(36).slice(2, 5) + Date.now().toString(36).slice(-5)).toUpperCase();
 
 async function audit(c, user, action, entity, entityId, data) {
+  if (user && user.impersonated_by) data = { ...(data || {}), oleh_super_admin: user.impersonated_by };
   await (c || db).query(`INSERT INTO audit_logs (user_id,action,entity,entity_id,data) VALUES ($1,$2,$3,$4,$5)`,
     [user ? user.id : null, action, entity, entityId || null, data ? JSON.stringify(data) : null]);
 }

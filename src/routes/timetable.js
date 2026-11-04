@@ -5,6 +5,9 @@ const crypto = require('crypto');
 const { db, tx } = require('../db');
 const { ah, fail, pick, setClause, insertSql, audit, notifyUnit } = require('../util');
 const { isSA, roles } = require('../auth');
+const multer = require('multer');
+const ttx = require('../services/tt-excel');
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const r = express.Router();
 const workers = new Map();
@@ -70,6 +73,27 @@ r.post('/tt/classes/import', roles('superadmin', 'unit_admin'), ah(async (req, r
   });
   res.json({ imported: n, errors });
 }));
+// Template Excel (kosong / berisi contoh data)
+r.get('/tt/excel-template', ah(async (req, res) => {
+  const wb = await ttx.buildWorkbook({ unitId: req.query.unit_id ? Number(req.query.unit_id) : null, sample: req.query.sample === '1' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${req.query.sample === '1' ? 'contoh-data-penjadwalan' : 'template-penjadwalan'}.xlsx"`);
+  await wb.xlsx.write(res); res.end();
+}));
+// Impor Excel: dry_run=1 untuk pratinjau (semua perubahan di-rollback)
+r.post('/tt/import-excel', roles('superadmin', 'unit_admin'), memUpload.single('file'), ah(async (req, res) => {
+  const { period_id, unit_id } = req.body; unitGuard(req.user, unit_id);
+  if (!req.file) fail(400, 'Pilih berkas Excel (.xlsx)');
+  if (!period_id) fail(400, 'Pilih periode akademik');
+  const data = await ttx.parseWorkbook(req.file.buffer);
+  const dry = req.body.dry_run === '1';
+  const out = await ttx.importData({ periodId: Number(period_id), unitId: Number(unit_id), data, dryRun: dry });
+  out.counts = { dosen: data.dosen.length, mk: data.mk.length, kelas: data.kelas.length, kendala: data.kendala.length };
+  out.dry_run = dry;
+  if (!dry) await audit(null, req.user, 'import_excel', 'course_classes', null, { period_id, unit_id, kelas: out.kelas, errors: out.errors.length });
+  res.json(out);
+}));
+
 // Salin kelas dari semester sebelumnya
 r.post('/tt/classes/copy', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const { from_period_id, to_period_id, unit_id } = req.body; unitGuard(req.user, unit_id);

@@ -124,11 +124,13 @@ route(/^#\/denah\/(\d+)$/, async (view, [fid]) => {
       <button class="tool on" data-tool="select" title="Pilih & pindah (V)" aria-label="Pilih">${I('pointer')}</button>
       <button class="tool" data-tool="rect" title="Ruang persegi (R)" aria-label="Ruang persegi">${I('rect')}</button>
       <button class="tool" data-tool="poly" title="Ruang poligon (P)" aria-label="Ruang poligon">${I('poly')}</button>
+      <button class="tool" data-tool="wand" id="wandBtn" ${f.background_file_id ? '' : 'hidden'} title="Isi ruang otomatis dari gambar latar: klik di dalam area ruang (W)" aria-label="Isi ruang otomatis dari gambar latar">${I('wand')}</button>
       <button class="tool" data-tool="pan" title="Geser tampilan (H / tahan Spasi)" aria-label="Geser">${I('hand')}</button><span class="sep"></span>
       <button class="tool" data-act="undo" title="Urungkan (Ctrl+Z)" aria-label="Urungkan">${I('undo')}</button><button class="tool" data-act="redo" title="Ulangi (Ctrl+Y)" aria-label="Ulangi">${I('redo')}</button>
       <button class="tool" data-act="dup" title="Duplikat (Ctrl+D)" aria-label="Duplikat">${I('copy')}</button><button class="tool" data-act="del" title="Hapus (Del)" aria-label="Hapus">${I('trash')}</button><span class="sep"></span>
       <label class="tool" title="Gambar latar untuk dijiplak (scan denah lama)" aria-label="Gambar latar">${I('img')}<input type="file" accept="image/*" hidden id="bgFile"></label>
       <input type="range" min="0" max="1" step="0.05" value="${f.background_opacity}" id="bgOp" style="width:90px;min-height:0" title="Transparansi latar" aria-label="Transparansi latar">
+      <button class="tool on" id="edgeSnapBtn" ${f.background_file_id ? '' : 'hidden'} title="Tempel ke tepi gambar latar saat menggambar" aria-label="Snap ke tepi gambar latar" aria-pressed="true">${I('magnet')}</button>
       <button class="btn sm ghost" data-act="size">Ukuran ${fmt.num(f.width)}×${fmt.num(f.height)} m</button>
       ${f.siblings.length > 1 ? `<button class="btn sm ghost" data-act="copy">Salin dari lantai…</button>` : ''}
       <span class="muted" id="dirty" style="margin-left:auto;font-size:13px"></span></div>
@@ -153,7 +155,7 @@ route(/^#\/denah\/(\d+)$/, async (view, [fid]) => {
         ${fp.unplaced.length ? `<p class="muted" style="margin-top:8px">${fp.unplaced.length} ruang terdaftar belum digambar.</p>` : ''}
         <div class="fp-legend" style="margin:12px 0">${cats.map(c => `<span><i class="dot" style="background:${c.color}"></i>${esc(c.name)}</span>`).join('')}</div>
         <ul class="room-list">${fp.rooms.map((x, k) => `<li data-pick="${k}"><i class="dot" style="background:${fp.color(x)}"></i><b class="mono">${esc(x.code)}</b> <span style="flex:1">${esc(x.name)}</span><small>${fmt.num(FPG.area(FPG.pts(x.shape)), 1)} m²</small></li>`).join('') || '<li class="muted" style="cursor:default">Belum ada ruang. Pilih alat Ruang persegi lalu seret di kanvas.</li>'}</ul>
-        <p class="muted" style="font-size:12.5px;margin-top:14px">Pintasan: V pilih · R persegi · P poligon · H geser · Del hapus · Ctrl+D duplikat · panah geser 1 grid (Shift ×5) · roda tetikus zoom · Alt nonaktifkan snap.</p>`;
+        <p class="muted" style="font-size:12.5px;margin-top:14px">Pintasan: V pilih · R persegi · P poligon · W isi otomatis dari gambar latar · H geser · Del hapus · Ctrl+D duplikat · panah geser 1 grid (Shift ×5) · roda tetikus zoom · Alt nonaktifkan snap.</p>`;
       s.onclick = e => { const li = e.target.closest('[data-pick]'); if (li) fp.select(Number(li.dataset.pick)); };
       return;
     }
@@ -206,10 +208,12 @@ route(/^#\/denah\/(\d+)$/, async (view, [fid]) => {
     const file = e.target.files[0]; if (!file) return;
     const a = await API.upload(file, { entity_type: 'floor', entity_id: fid, doc_type: 'latar_denah' }).catch(UI.err); if (!a) return;
     await API.put('/floors/' + fid, { background_file_id: a.id }); f.background_file_id = a.id; fp.setFloor({ bg: API.file(a.id) });
+    $('#edgeSnapBtn').hidden = false; $('#wandBtn').hidden = false;
     UI.toast('Gambar latar dipasang. Sesuaikan ukuran area gambar agar skala cocok.');
   };
   $('#bgOp').oninput = e => fp.setFloor({ bgOpacity: e.target.value });
   $('#bgOp').onchange = e => API.put('/floors/' + fid, { background_opacity: Number(e.target.value) });
+  $('#edgeSnapBtn').onclick = () => { fp.o.edgeSnap = !fp.o.edgeSnap; $('#edgeSnapBtn').classList.toggle('on', fp.o.edgeSnap); $('#edgeSnapBtn').setAttribute('aria-pressed', fp.o.edgeSnap); };
   $('#save').onclick = async () => {
     const bad = fp.rooms.find(r => !r.code || !r.name); if (bad) return UI.toast(`Ruang tanpa kode/nama. Lengkapi dulu.`, true);
     const dup = fp.rooms.map(r => r.code).find((c, i, a) => a.indexOf(c) !== i); if (dup) return UI.toast(`Kode ruang ${dup} dipakai lebih dari sekali`, true);

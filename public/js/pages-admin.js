@@ -1,14 +1,15 @@
 /* ===== Master data, unit, pengguna, pengaturan, audit, laporan ===== */
 'use strict';
-function crudPage({ path, title, lead, endpoint, columns, fields, canWrite = () => App.isSA(), filters = [], refKey, importKey }) {
+function crudPage({ path, title, lead, endpoint, columns, fields, canWrite = () => App.isSA(), filters = [], refKey, importKey, headActions = '', after }) {
   route(new RegExp('^#\\/' + path.replace('/', '\\/') + '$'), async (view, _, q) => {
     const res = await API.get(endpoint, { ...q, limit: 5000 }), rows = res.rows || res, w = canWrite() && App.canWrite();
     const fs = typeof fields === 'function' ? await fields() : fields;
-    view.innerHTML = App.head(title, lead, w ? (importKey ? Importer.buttons(importKey) : '') + `<button class="btn primary" id="add">${I('plus')} Tambah</button>` : '') +
+    view.innerHTML = App.head(title, lead, (w ? headActions : '') + (w ? (importKey ? Importer.buttons(importKey) : '') + `<button class="btn primary" id="add">${I('plus')} Tambah</button>` : '')) +
       (filters.length ? `<div class="filters">${filters.map(f => f.type === 'search' ? `<input type="search" data-f="${f.name}" placeholder="${f.label}" value="${esc(q[f.name] || '')}">` : `<select data-f="${f.name}"><option value="">${f.label}</option>${UI.options(f.options, q[f.name])}</select>`).join('')}</div>` : '') +
       `<div class="panel">${UI.table({ rows, columns, rowAttr: r => (w ? `class="click" data-id="${r.id}"` : '') })}</div>`;
     bindFilters(view, '#/' + path, q);
     const done = () => { refKey && Ref.clear(refKey); App.render(); };
+    if (after) after(view, rows, w);
     if (!w) return;
     if (importKey) Importer.bind(view, importKey, title, done);
     $('#add').onclick = () => UI.formModal({ title: 'Tambah ' + title.toLowerCase(), fields: fs, onSubmit: async v => { await API.post(endpoint, v); done(); } });
@@ -46,7 +47,61 @@ crudPage({ path: 'master/periode', importKey: 'periods', title: 'Periode akademi
   fields: [{ name: 'name', label: 'Nama', required: true, placeholder: '2026/2027 Genap' }, { name: 'start_date', label: 'Mulai perkuliahan', type: 'date', required: true }, { name: 'end_date', label: 'Akhir perkuliahan', type: 'date', required: true }, { name: 'is_active', label: 'Jadikan periode aktif', type: 'checkbox' }] });
 crudPage({ path: 'master/sesi', importKey: 'slots', title: 'Sesi kuliah', lead: 'Jam pelajaran. Sesi yang tidak bersambung (ada jeda istirahat) tidak akan digabung dalam satu kelas.', endpoint: '/time-slots', refKey: 'slots',
   columns: [{ label: 'Sesi', num: true, key: 'slot_no' }, { label: 'Mulai', render: s => s.start_time.slice(0, 5) }, { label: 'Selesai', render: s => s.end_time.slice(0, 5) }],
-  fields: [{ name: 'slot_no', label: 'Nomor sesi', type: 'number', required: true }, { name: 'start_time', label: 'Mulai', type: 'time', required: true }, { name: 'end_time', label: 'Selesai', type: 'time', required: true }] });
+  fields: [{ name: 'slot_no', label: 'Nomor sesi', type: 'number', required: true }, { name: 'start_time', label: 'Mulai', type: 'time', required: true }, { name: 'end_time', label: 'Selesai', type: 'time', required: true }],
+  headActions: `<button class="btn" id="genSlots">${I('clock')} Buat sesi otomatis</button>`,
+  after: (view, rows, w) => { const b = $('#genSlots', view); if (b) b.onclick = () => Pages.slotGenerator(rows); } });
+
+// Generator sesi: jumlah sesi + jam mulai + durasi -> seluruh jam dihitung otomatis
+Pages.slotGenerator = (rows) => {
+  const toMin = x => { const [a, b] = String(x).split(':').map(Number); return a * 60 + b; };
+  const hm = t => `${pad(Math.floor(t / 60))}.${pad(t % 60)}`;
+  const guessDur = rows.length ? toMin(rows[0].end_time) - toMin(rows[0].start_time) : 50;
+  const st = { count: rows.length || 14, start: rows.length ? rows[0].start_time.slice(0, 5) : '07:30', minutes: guessDur || 50, gap: 0,
+    breaks: rows.length > 1 ? rows.slice(0, -1).map((r, i) => ({ after: r.slot_no, minutes: toMin(rows[i + 1].start_time) - toMin(r.end_time) })).filter(b => b.minutes > 0) : [{ after: 6, minutes: 30 }, { after: 11, minutes: 80 }] };
+  if (rows.length > 1) { const g = Math.min(...st.breaks.map(b => b.minutes), Infinity); if (st.breaks.length >= rows.length - 1 && g < 30) { st.gap = g; st.breaks = st.breaks.map(b => ({ ...b, minutes: b.minutes - g })).filter(b => b.minutes > 0); } }
+  const calc = () => {
+    const out = []; let t = toMin(st.start || '07:30'), err = '';
+    const brk = {}; st.breaks.forEach(b => { if (b.after && b.minutes) brk[b.after] = (brk[b.after] || 0) + Number(b.minutes); });
+    for (let i = 1; i <= st.count; i++) { const e = t + Number(st.minutes); if (e > 1440) { err = `Sesi ${i} melewati pukul 24.00`; break; } out.push({ no: i, s: t, e, brk: brk[i] || 0 }); t = e + Number(st.gap) + (brk[i] || 0); }
+    return { out, err };
+  };
+  const m = UI.modal({ title: 'Buat sesi kuliah otomatis', wide: true, body: `<p class="muted">Isi jumlah sesi, jam mulai, dan lama per sesi. Jam setiap sesi dihitung otomatis. Tambahkan istirahat (mis. setelah sesi 6 selama 30 menit) bila perlu.</p>
+    <div class="form-grid" style="margin-top:12px">
+      <label class="field"><span>Jumlah sesi <i>*</i></span><input type="number" min="1" max="30" data-k="count" value="${st.count}"></label>
+      <label class="field"><span>Jam mulai sesi pertama <i>*</i></span><input type="time" data-k="start" value="${st.start}"></label>
+      <label class="field"><span>Durasi per sesi (menit) <i>*</i></span><input type="number" min="10" max="240" data-k="minutes" value="${st.minutes}"></label>
+      <label class="field"><span>Jeda antarsesi (menit)</span><input type="number" min="0" max="120" data-k="gap" value="${st.gap}"><small class="help">Mis. 5 menit pergantian kelas. Jeda ≤ 15 menit tetap dianggap bersambung untuk kelas multi-sesi.</small></label></div>
+    <h3 style="margin:16px 0 8px">Istirahat</h3><div id="brks"></div><button class="btn sm" id="addBrk" style="margin-top:6px">${I('plus')} Tambah istirahat</button>
+    <h3 style="margin:18px 0 8px">Pratinjau</h3><div id="prev"></div>
+    <p class="muted" style="font-size:13px;margin-top:10px">Menyimpan akan <b>mengganti seluruh sesi</b>. Kendala penjadwalan yang memakai nomor sesi perlu disesuaikan bila jumlah atau urutan sesi berubah.</p>`,
+  actions: [{ label: 'Batal' }, { label: 'Simpan sesi', kind: 'primary', onClick: async () => {
+    const { err } = calc(); if (err) throw new Error(err);
+    if (rows.length && !(await UI.confirm(`Ganti ${rows.length} sesi yang ada dengan ${st.count} sesi baru?`, { ok: 'Ganti sesi' }))) return false;
+    await API.post('/time-slots/generate', { count: Number(st.count), start: st.start, minutes: Number(st.minutes), gap: Number(st.gap), breaks: st.breaks.map(b => ({ after: Number(b.after), minutes: Number(b.minutes) })) });
+    Ref.clear('slots'); UI.toast('Sesi kuliah diperbarui'); App.render();
+  } }] });
+  const draw = () => {
+    const { out, err } = calc();
+    const bx = $('#brks', m.el);
+    bx.innerHTML = st.breaks.length ? st.breaks.map((b, i) => `<div class="btn-row" style="margin-bottom:6px"><span style="width:130px">Setelah sesi</span>
+      <input type="number" min="1" max="${st.count - 1}" value="${b.after}" data-bi="${i}" data-bk="after" style="width:80px">
+      <span>selama</span><input type="number" min="5" max="180" step="5" value="${b.minutes}" data-bi="${i}" data-bk="minutes" style="width:90px"><span>menit</span>
+      <button class="btn sm ghost" data-delb="${i}" style="margin-left:auto">${I('trash')}</button></div>`).join('') : '<p class="muted">Tidak ada jeda istirahat.</p>';
+    const pv = $('#prev', m.el);
+    if (err) pv.innerHTML = `<div class="badge bad">${esc(err)}</div>`;
+    else pv.innerHTML = `<div class="fp-legend" style="margin-bottom:6px">${out.map(x => `<span style="display:inline-block;padding:3px 8px;background:var(--sunk);border-radius:var(--r-sm);margin:2px 4px 2px 0"><b>Sesi ${x.no}</b> ${hm(x.s)}–${hm(x.e)}${x.brk ? ` <i class="badge warn sm">+${x.brk}m</i>` : ''}</span>`).join('')}</div>`;
+  };
+  m.el.oninput = e => {
+    const k = e.target.dataset.k; if (k) { st[k] = e.target.value; draw(); return; }
+    const bi = e.target.dataset.bi, bk = e.target.dataset.bk;
+    if (bi !== undefined && bk) { st.breaks[Number(bi)][bk] = Number(e.target.value); draw(); }
+  };
+  m.el.onclick = e => {
+    if (e.target.closest('#addBrk')) { st.breaks.push({ after: Math.min(st.count - 1, 6), minutes: 30 }); draw(); return; }
+    const d = e.target.closest('[data-delb]'); if (d) { st.breaks.splice(Number(d.dataset.delb), 1); draw(); }
+  };
+  draw();
+};
 
 // ---------- Unit pengelola ----------
 route(/^#\/unit$/, async view => {
@@ -57,7 +112,7 @@ route(/^#\/unit$/, async view => {
     `<div class="panel">${UI.table({ rows: units, empty: 'Belum ada unit.', columns: [{ label: 'Unit', render: u => `<b>${esc(u.name)}</b><br><small class="mono">${esc(u.code)}</small>` },
       { label: 'Gedung / ruang dikelola', render: u => `${esc(u.buildings || '–')}<br><small>${u.room_count} ruang efektif</small>` }, { label: 'Pimpinan', render: u => esc(u.head_name || '–') },
       { label: 'Akun admin', render: u => `<span class="mono">${esc(u.admin_username || '–')}</span><br>${u.admin_active ? '<span class="badge ok">Aktif</span>' : u.admin_ready ? '<span class="badge warn">Nonaktif</span>' : '<span class="badge warn">Belum diisi</span>'}` },
-      ...(sa ? [{ label: '', render: u => `<div class="btn-row" style="justify-content:flex-end"><button class="btn sm" data-asg="${u.id}">Penugasan</button><button class="btn sm" data-adm="${u.id}">Akun admin</button><button class="btn sm ghost" data-ed="${u.id}">Ubah</button></div>` }] : [])] })}</div>`;
+      ...(sa ? [{ label: '', render: u => `<div class="btn-row" style="justify-content:flex-end">${u.admin_active ? `<button class="btn sm ghost" data-as="${u.id}" title="Masuk sebagai admin unit ini">Masuk sebagai</button>` : ''}<button class="btn sm" data-asg="${u.id}">Penugasan</button><button class="btn sm" data-adm="${u.id}">Akun admin</button><button class="btn sm ghost" data-ed="${u.id}">Ubah</button></div>` }] : [])] })}</div>`;
   if (!sa) return;
   const F = [{ name: 'code', label: 'Kode unit', required: true, placeholder: 'mis. FT, FEB, BAAK', help: 'Username admin: admin.<kode>' }, { name: 'name', label: 'Nama unit', required: true }, { name: 'head_name', label: 'Nama pimpinan unit' }, { name: 'head_nip', label: 'NIP pimpinan' },
     { name: 'email', label: 'Email unit', type: 'email' }, { name: 'phone', label: 'Telepon' }, { name: 'description', label: 'Keterangan', type: 'textarea' }];
@@ -65,6 +120,7 @@ route(/^#\/unit$/, async view => {
   Importer.bind(view, 'units', 'Unit pengelola', done);
   $('#add').onclick = () => UI.formModal({ title: 'Buat unit pengelola', fields: F, onSubmit: async v => { const u = await API.post('/units', v); UI.toast(`Unit dibuat. Akun ${u.admin_username} menunggu password.`); done(); } });
   view.onclick = async e => {
+    const as = e.target.closest('[data-as]'); if (as) { const un = units.find(x => x.id === Number(as.dataset.as)); return App.impersonate(null, un.id); }
     const ed = e.target.closest('[data-ed]'), adm = e.target.closest('[data-adm]'), asg = e.target.closest('[data-asg]');
     const u = units.find(x => x.id === Number((ed || adm || asg || {}).dataset?.[ed ? 'ed' : adm ? 'adm' : 'asg']));
     if (ed) { const m = UI.formModal({ title: 'Ubah unit', fields: F.filter(f => f.name !== 'code'), values: u, onSubmit: async v => { await API.put('/units/' + u.id, v); done(); } });
@@ -100,6 +156,7 @@ route(/^#\/pengguna$/, async view => {
   $('#add').onclick = () => UI.formModal({ title: 'Tambah pengguna', fields: F(false), values: { role: 'unit_admin' }, onSubmit: async v => { await API.post('/users', v); App.render(); } });
   view.onclick = e => { const tr = e.target.closest('[data-u]'); if (!tr) return; const u = rows.find(x => x.id === Number(tr.dataset.u));
     const m = UI.formModal({ title: 'Ubah pengguna', fields: F(true), values: u, onSubmit: async v => { if (!v.password) delete v.password; await API.put('/users/' + u.id, v); App.render(); } });
+    if (u.role !== 'superadmin') { const as = document.createElement('button'); as.className = 'btn'; as.textContent = 'Masuk sebagai'; as.onclick = () => { m.close(); App.impersonate(u.id); }; $('.modal-foot', m.el).prepend(as); }
     if (!u.is_unit_primary && u.id !== App.me.id) { const del = document.createElement('button'); del.className = 'btn danger'; del.textContent = 'Hapus'; del.style.marginRight = 'auto';
       del.onclick = async () => { if (await UI.confirm('Hapus pengguna ini?', { danger: true })) { await API.del('/users/' + u.id); m.close(); App.render(); } }; $('.modal-foot', m.el).prepend(del); } };
 });

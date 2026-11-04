@@ -38,6 +38,8 @@ mainApp.use('/api', require('./routes/reschedule'));
 mainApp.use('/api', require('./routes/timetable'));
 mainApp.use('/api', require('./routes/assets').router);
 mainApp.use('/api', require('./routes/inventory'));
+mainApp.use('/api', require('./routes/fixed'));
+mainApp.use('/api', require('./routes/stock'));
 mainApp.use('/api', feedback.router);
 mainApp.use('/api', require('./routes/reports'));
 mainApp.use('/api', require('./routes/import'));

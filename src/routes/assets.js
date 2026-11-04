@@ -135,6 +135,9 @@ r.get('/assets/:id', ah(async (req, res) => {
     WHERE h.asset_id=$1 ORDER BY h.created_at DESC, h.id DESC`, [a.id]);
   a.maintenance = await db.q('SELECT * FROM maintenance WHERE asset_id=$1 ORDER BY start_date DESC', [a.id]);
   a.depreciation = await db.one('SELECT * FROM asset_dep($1)', [a.id]);
+  a.loan = await db.one(`SELECT l.id, l.number, l.start_date, l.due_date, p.name borrower_name FROM asset_loan_items i JOIN asset_loans l ON l.id=i.loan_id
+    LEFT JOIN people p ON p.id=l.borrower_id WHERE i.asset_id=$1 AND l.status='dipinjam'`, [a.id]);
+  if (a.acquisition_id) a.acquisition = await db.one('SELECT id, number FROM asset_acquisitions WHERE id=$1', [a.acquisition_id]);
   a.files = await db.q(`SELECT * FROM attachments WHERE entity_type='asset' AND entity_id=$1 ORDER BY created_at DESC`, [a.id]);
   res.json(a);
 }));

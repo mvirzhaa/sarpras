@@ -15,7 +15,7 @@
  */
 function solve(P, onProgress = () => {}) {
   const t0 = Date.now();
-  const prm = Object.assign({ population: 60, generations: 1000, time_limit_ms: 120000, stagnation: 150, elite: 2, tournament: 3, crossover: 0.85, mutation: 0.02 }, P.params || {});
+  const prm = Object.assign({ max_gap_min: 15, population: 60, generations: 1000, time_limit_ms: 120000, stagnation: 150, elite: 2, tournament: 3, crossover: 0.85, mutation: 0.02 }, P.params || {});
   const days = P.days.map(Number), D = days.length;
   const slots = P.slots, S = slots.length, DS = D * S;
   const rooms = P.rooms, R = rooms.length;
@@ -25,7 +25,10 @@ function solve(P, onProgress = () => {}) {
   const slotIdx = new Map(slots.map((s, i) => [Number(s.slot_no), i]));
   const dayIdx = new Map(days.map((d, i) => [d, i]));
   const roomIdx = new Map(rooms.map((r, i) => [Number(r.id), i]));
-  const contiguous = slots.map((s, i) => i < S - 1 && s.end_time === slots[i + 1].start_time);
+  // Dua sesi dianggap bersambung bila jedanya <= max_gap_min (pergantian kelas), bukan istirahat
+  const toMin = x => { const [a, b] = String(x).split(':').map(Number); return a * 60 + b; };
+  const maxGap = Number(prm.max_gap_min ?? 15);
+  const contiguous = slots.map((s, i) => i < S - 1 && toMin(slots[i + 1].start_time) - toMin(s.end_time) >= 0 && toMin(slots[i + 1].start_time) - toMin(s.end_time) <= maxGap);
   const canSpan = (s, dur) => { if (s + dur > S) return false; for (let k = s; k < s + dur - 1; k++) if (!contiguous[k]) return false; return true; };
 
   // ---- Gen ----

@@ -5,10 +5,10 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const { db, tx } = require('../db');
 const { ah, fail, pick, audit, setClause } = require('../util');
-const { sign, authRequired, roles, isSA } = require('../auth');
+const { sign, signAs, authRequired, roles, isSA } = require('../auth');
 const crud = require('../crud');
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads'));
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const upload = multer({
   storage: multer.diskStorage({
@@ -45,7 +45,25 @@ r.get('/auth/me', ah(async (req, res) => {
   const org = await db.one(`SELECT value FROM settings WHERE key='org'`);
   res.json({ ...req.user, unread: unread.n, org: org ? org.value : {} });
 }));
+// ---- Super Admin: masuk sebagai admin unit ----
+r.post('/auth/impersonate', roles('superadmin'), ah(async (req, res) => {
+  const t = req.body.user_id
+    ? await db.one('SELECT u.*, n.name unit_name FROM users u LEFT JOIN units n ON n.id=u.unit_id WHERE u.id=$1', [req.body.user_id])
+    : await db.one(`SELECT u.*, n.name unit_name FROM users u JOIN units n ON n.id=u.unit_id WHERE u.unit_id=$1 AND u.role='unit_admin' ORDER BY u.is_unit_primary DESC, u.id LIMIT 1`, [req.body.unit_id]);
+  if (!t) fail(404, 'Unit ini belum memiliki akun admin');
+  if (t.role === 'superadmin') fail(400, 'Tidak dapat masuk sebagai Super Admin');
+  await audit(null, req.user, 'impersonate', 'users', t.id, { unit_id: t.unit_id, target: t.username });
+  res.json({ token: signAs(t.id, req.user.id), user: { username: t.username, name: t.name, unit_name: t.unit_name } });
+}));
+r.post('/auth/impersonate/stop', ah(async (req, res) => {
+  if (!req.user.impersonated_by) fail(400, 'Anda tidak sedang dalam mode masuk sebagai');
+  const sa = await db.one(`SELECT id FROM users WHERE id=$1 AND role='superadmin' AND active`, [req.user.impersonated_by]);
+  await audit(null, sa, 'impersonate_stop', 'users', req.user.id);
+  res.json({ token: sign(sa) });
+}));
+
 r.post('/auth/password', ah(async (req, res) => {
+  if (req.user.impersonated_by) fail(403, 'Tidak dapat mengganti password saat masuk sebagai unit');
   const { old_password, new_password } = req.body;
   if (!new_password || new_password.length < 8) fail(400, 'Password baru minimal 8 karakter');
   const u = await db.one('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
@@ -211,6 +229,30 @@ r.put('/units/:id/assignments', roles('superadmin'), ah(async (req, res) => {
 
 // ---------------- Master data ----------------
 r.use('/room-categories', crud({ table: 'room_categories', fields: ['name', 'color', 'bookable', 'schedulable', 'description', 'sort'], search: ['t.name'], order: 't.sort, t.name' }));
+// Buat ulang seluruh sesi kuliah dari jumlah sesi, jam mulai, durasi, jeda & istirahat
+r.post('/time-slots/generate', roles('superadmin'), ah(async (req, res) => {
+  const n = Number(req.body.count), dur = Number(req.body.minutes), gap = Number(req.body.gap) || 0;
+  const [h, m] = String(req.body.start || '').split(':').map(Number);
+  if (!(n >= 1 && n <= 30)) fail(400, 'Jumlah sesi 1–30');
+  if (!(dur >= 10 && dur <= 240)) fail(400, 'Durasi per sesi 10–240 menit');
+  if (Number.isNaN(h) || Number.isNaN(m)) fail(400, 'Jam mulai tidak valid');
+  if (gap < 0 || gap > 120) fail(400, 'Jeda antarsesi 0–120 menit');
+  const brk = new Map();
+  for (const b of req.body.breaks || []) { const a = Number(b.after), mi = Number(b.minutes); if (a >= 1 && a < n && mi > 0) brk.set(a, (brk.get(a) || 0) + mi); }
+  const hm = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  let t = h * 60 + m; const slots = [];
+  for (let i = 1; i <= n; i++) {
+    const e = t + dur; if (e > 24 * 60) fail(400, `Sesi ${i} melewati pukul 24.00`);
+    slots.push({ slot_no: i, start_time: hm(t), end_time: hm(e) });
+    t = e + gap + (brk.get(i) || 0);
+  }
+  await tx(async c => {
+    await c.query('DELETE FROM time_slots');
+    for (const x of slots) await c.query('INSERT INTO time_slots (slot_no,start_time,end_time) VALUES ($1,$2,$3)', [x.slot_no, x.start_time, x.end_time]);
+    await audit(c, req.user, 'generate', 'time_slots', null, req.body);
+  });
+  res.json({ slots });
+}));
 r.use('/time-slots', crud({ table: 'time_slots', fields: ['slot_no', 'start_time', 'end_time'], order: 't.slot_no' }));
 r.use('/periods', crud({
   table: 'academic_periods', fields: ['name', 'start_date', 'end_date', 'is_active'], order: 't.start_date DESC',

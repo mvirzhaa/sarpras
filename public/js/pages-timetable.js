@@ -43,7 +43,8 @@ async function ttClasses(body, { period, unit, cats, periods }) {
   const [rows, courses, people] = await Promise.all([API.get('/tt/classes', { period_id: period, unit_id: unit }), API.get('/courses', { limit: 5000 }).then(r => r.rows), Ref.get('people')]);
   const totalSess = rows.reduce((s, r) => s + r.sessions_per_week * r.duration_slots, 0);
   body.innerHTML = `<div class="page-head" style="margin-bottom:12px"><p class="lead">${rows.length} kelas · ${totalSess} sesi-jam per pekan</p><div class="actions">
-      <button class="btn" id="copy">Salin dari semester lain</button><button class="btn" id="imp">${I('dl')} Impor CSV</button><button class="btn primary" id="add">${I('plus')} Tambah kelas</button></div></div>
+      <button class="btn" id="copy">Salin dari semester lain</button><button class="btn" id="imp">Impor CSV</button>
+      <button class="btn" id="tpl">${I('dl')} Template Excel</button><button class="btn" id="impx">${I('dl')} Impor Excel</button><button class="btn primary" id="add">${I('plus')} Tambah kelas</button></div></div>
     <div class="panel">${UI.table({ rows, empty: 'Belum ada kelas. Tambah manual, impor CSV, atau salin dari semester sebelumnya.', rowAttr: r => `class="click" data-c="${r.id}"`, columns: [
       { label: 'Mata kuliah', render: r => `<b class="mono">${esc(r.course_code)}</b> ${esc(r.course_name)}${(r.tags || []).length ? `<br>${r.tags.map(t => `<span class="badge">${esc(t)}</span>`).join(' ')}` : ''}` },
       { label: 'Kelas', render: r => esc(r.class_name) }, { label: 'Rombel', render: r => esc(r.student_group || '–') }, { label: 'Dosen', render: r => esc(r.lecturer_name || '–') },
@@ -68,6 +69,44 @@ async function ttClasses(body, { period, unit, cats, periods }) {
   };
   $('#copy').onclick = () => UI.formModal({ title: 'Salin kelas dari semester lain', fields: [{ name: 'from_period_id', label: 'Semester sumber', type: 'select', required: true, options: periods.filter(p => p.id !== period).map(p => ({ value: p.id, label: p.name })) }],
     onSubmit: async v => { const r = await API.post('/tt/classes/copy', { ...v, to_period_id: period, unit_id: unit }); UI.toast(`${r.copied} kelas disalin`); App.render(); } });
+  $('#tpl').onclick = () => {
+    const m = UI.modal({ title: 'Unduh template Excel penjadwalan', wide: true, body: `<p>Template berisi sheet <b>Dosen</b>, <b>Mata Kuliah</b>, <b>Kelas</b>, <b>Kendala</b>, dan <b>Petunjuk</b>, lengkap dengan daftar pilihan kategori ruang, kode ruang unit, jenis kendala, dan hari.</p>
+      <div class="btn-row" style="margin-top:14px"><a class="btn primary" href="${API.url('/tt/excel-template', { unit_id: unit })}">${I('dl')} Template kosong</a>
+      <a class="btn" href="${API.url('/tt/excel-template', { unit_id: unit, sample: 1 })}">${I('dl')} Template berisi contoh data</a></div>
+      <p class="muted" style="font-size:13px;margin-top:12px">Contoh data: Prodi Teknik Informatika semester ganjil — 18 dosen, 26 mata kuliah, 51 kelas (termasuk kelas karyawan malam), dan 11 kendala. Nama dan NIDN fiktif.</p>`, actions: [{ label: 'Tutup' }] });
+    return m;
+  };
+  $('#impx').onclick = () => {
+    let file = null;
+    const m = UI.modal({ title: 'Impor data penjadwalan dari Excel', wide: true, body: `<p>Pilih berkas .xlsx sesuai template. Sistem memeriksa isi berkas dan menampilkan pratinjau sebelum menyimpan.</p>
+      <label class="field" style="margin-top:12px"><span>Berkas Excel</span><input type="file" id="xf" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label><div id="xr" style="margin-top:14px"></div>`,
+    actions: [{ label: 'Batal' }, { label: 'Impor sekarang', kind: 'primary', onClick: async () => {
+      if (!file) throw new Error('Pilih berkas dan tunggu pratinjau selesai');
+      const r = await send(false);
+      const repl = $('#xrep', m.el);
+      if (r.constraints.length) {
+        const key = `tt_cfg_${unit}`, cfg = JSON.parse(localStorage.getItem(key) || 'null') || { room_scope: { mode: 'owned' }, constraints: [], params: { population: 60, generations: 1000, time_limit_ms: 90000, days: [1, 2, 3, 4, 5, 6] } };
+        cfg.constraints = repl && repl.checked ? r.constraints : cfg.constraints.concat(r.constraints);
+        localStorage.setItem(key, JSON.stringify(cfg));
+      }
+      UI.toast(`Impor selesai: ${r.kelas.created} kelas baru, ${r.kelas.updated} diperbarui${r.constraints.length ? `, ${r.constraints.length} kendala` : ''}`);
+      App.render();
+    } }] });
+    const send = async dry => { const fd = new FormData(); fd.append('file', file); fd.append('period_id', period); fd.append('unit_id', unit); fd.append('dry_run', dry ? '1' : '0'); return API.req('POST', '/tt/import-excel', fd); };
+    $('#xf', m.el).onchange = async e => {
+      file = e.target.files[0]; if (!file) return;
+      const box = $('#xr', m.el); box.innerHTML = '<div class="empty">Memeriksa berkas…</div>';
+      try {
+        const r = await send(true);
+        box.innerHTML = `<div class="stats" style="margin-bottom:12px"><div class="stat"><b>${r.counts.dosen}</b><span>Dosen (${r.dosen.created} baru)</span></div><div class="stat"><b>${r.counts.mk}</b><span>Mata kuliah (${r.mk.created} baru)</span></div>
+          <div class="stat"><b>${r.kelas.created + r.kelas.updated}</b><span>Kelas siap (${r.kelas.created} baru, ${r.kelas.updated} diperbarui)</span></div><div class="stat"><b>${r.constraints.length}</b><span>Kendala</span></div></div>
+          ${r.errors.length ? `<div class="form-error"><b>${r.errors.length} baris bermasalah dan akan dilewati:</b><br>${r.errors.slice(0, 30).map(esc).join('<br>')}${r.errors.length > 30 ? '<br>…' : ''}</div>` : '<p class="badge ok">Tidak ada kesalahan</p>'}
+          ${r.warnings.length ? `<details style="margin:10px 0"><summary class="muted">${r.warnings.length} catatan</summary><ul>${r.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
+          ${r.preview.length ? `<h3 style="margin:12px 0 6px">Pratinjau kelas</h3>${UI.table({ rows: r.preview, columns: [{ label: 'Baris', num: true, key: 'row' }, { label: 'Mata kuliah', key: 'course' }, { label: 'Kelas', key: 'class_name' }, { label: 'Rombel', key: 'group' }, { label: 'Dosen', key: 'lecturer' }, { label: 'Mhs', num: true, key: 'size' }, { label: 'Sesi', num: true, key: 'dur' }] })}` : ''}
+          ${r.constraints.length ? `<label class="check" style="margin-top:12px"><input type="checkbox" id="xrep" checked> Ganti kendala yang tersimpan dengan ${r.constraints.length} kendala dari Excel (bila tidak dicentang, ditambahkan)</label>` : ''}`;
+      } catch (er) { box.innerHTML = `<div class="form-error">${esc(er.message)}</div>`; file = null; }
+    };
+  };
   $('#imp').onclick = () => {
     const head = 'course_code,course_name,credits,semester_level,tags,class_name,student_group,lecturer,student_count,duration_slots,sessions_per_week,category';
     const m = UI.modal({ title: 'Impor kelas dari CSV', wide: true, body: `<p>Kolom (baris pertama = judul). Pemisah koma atau titik koma. Kolom <span class="mono">lecturer</span> berisi NIDN atau nama dosen; <span class="mono">tags</span> dipisah titik koma; <span class="mono">category</span> = nama kategori ruang.</p>

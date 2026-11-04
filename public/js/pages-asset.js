@@ -59,7 +59,7 @@ route(/^#\/aset$/, async (view, _, q) => {
   const [res, blds, people] = await Promise.all([API.get('/assets', { ...q, limit, offset: page * limit }), Ref.get('buildings'), Ref.get('people')]);
   const rooms = await Ref.roomOpts(!App.isSA() && App.me.role !== 'pimpinan');
   view.innerHTML = App.head('Daftar aset', `${fmt.num(res.total)} aset · nilai perolehan ${fmt.rp(res.value)} · akumulasi penyusutan ${fmt.rp(res.acc)} · nilai buku ${fmt.rp(res.book)}`,
-    `<button class="btn" id="scan">${I('scan')} Pindai</button>${App.canWrite() ? `<button class="btn primary" id="add">${I('plus')} Daftarkan aset</button>` : ''}`) + `
+    `<button class="btn" id="scan">${I('scan')} Pindai</button>${App.canWrite() ? `<a class="btn" href="#/aset-pembelian">${I('plus')} Pengadaan (banyak barang)</a><button class="btn primary" id="add">${I('plus')} Daftarkan aset</button>` : ''}`) + `
     <div class="filters"><input type="search" data-f="q" placeholder="Cari nama, kode, nomor seri, merek" value="${esc(q.q || '')}">
       <input data-f="code" placeholder="Awalan kode, mis. 3.10" value="${esc(q.code || '')}" style="min-width:150px">
       <select data-f="building_id"><option value="">Semua gedung</option>${UI.options(blds.map(b => ({ value: b.id, label: b.name })), q.building_id)}</select>
@@ -68,7 +68,7 @@ route(/^#\/aset$/, async (view, _, q) => {
       <select data-f="condition"><option value="">Semua kondisi</option>${UI.options(condOpts, q.condition)}</select>
       <select data-f="status"><option value="aktif">Aktif</option><option value="dihapus" ${q.status === 'dihapus' ? 'selected' : ''}>Sudah dihapuskan</option></select></div>
     <div class="btn-row no-print" id="bulk" hidden style="margin-bottom:10px"><b id="nsel"></b>
-      <button class="btn sm" data-b="mut">${I('move')} Mutasi</button><button class="btn sm" data-b="label">${I('qr')} Cetak label</button>
+      <button class="btn sm" data-b="mut">${I('move')} Mutasi</button><button class="btn sm" data-b="loan">${I('person')} Pemakaian</button><button class="btn sm" data-b="label">${I('qr')} Cetak label</button>
       <button class="btn sm" data-b="cond">Ubah kondisi</button><button class="btn sm danger" data-b="disp">Hapuskan</button></div>
     <div class="panel" id="tbl">${UI.table({ rows: res.rows, select: App.canWrite() || true, empty: 'Belum ada aset pada filter ini.', rowAttr: a => `class="click" data-a="${a.id}"`, columns: [
       { label: 'Kode aset', render: a => `<span class="tag">${esc(a.tag)}</span>` }, { label: 'Nama', render: a => `<b>${esc(a.name)}</b><br><small>${esc([a.brand, a.model].filter(Boolean).join(' ') || a.code_name)}</small>` },
@@ -87,6 +87,7 @@ route(/^#\/aset$/, async (view, _, q) => {
     const b = e.target.closest('[data-b]');
     if (b) {
       if (b.dataset.b === 'mut') Pages.mutationForm(sel);
+      if (b.dataset.b === 'loan') Pages.loanForm(sel);
       if (b.dataset.b === 'label') { sessionStorage.setItem('sp_labels', JSON.stringify(sel)); location.hash = '#/label'; }
       if (b.dataset.b === 'disp') Pages.disposeForm(sel);
       if (b.dataset.b === 'cond') UI.formModal({ title: `Ubah kondisi ${sel.length} aset`, fields: [{ name: 'condition', label: 'Kondisi', type: 'select', empty: false, options: condOpts }, { name: 'note', label: 'Keterangan', type: 'textarea' }],
@@ -118,16 +119,18 @@ Pages.disposeForm = (ids) => UI.formModal({ title: `Hapuskan ${ids.length} aset`
   onSubmit: async v => { const r = await API.post('/assets/dispose', { asset_ids: ids, ...v }); location.hash = '#/ba/' + r.id; } });
 
 // ---------- Kartu inventaris aset ----------
-const HIST = { registrasi: 'Registrasi', mutasi: 'Mutasi', kondisi: 'Perubahan kondisi', perbaikan: 'Perbaikan', opname: 'Stock opname', penghapusan: 'Penghapusan', ubah_data: 'Ubah data' };
+const HIST = { dipakai: 'Pemakaian (pinjam pakai)', dikembalikan: 'Pengembalian', registrasi: 'Registrasi', mutasi: 'Mutasi', kondisi: 'Perubahan kondisi', perbaikan: 'Perbaikan', opname: 'Stock opname', penghapusan: 'Penghapusan', ubah_data: 'Ubah data' };
 route(/^#\/aset\/(\d+)$/, async (view, [id]) => {
   const a = await API.get('/assets/' + id), can = a.can_manage && a.status === 'aktif';
   view.innerHTML = `<div class="panel panel-body" style="margin-bottom:18px"><div class="asset-head"><div>
       <div class="asset-tag">${esc(a.tag)}</div><h1 style="margin:6px 0">${esc(a.name)}</h1>
       <p class="muted">${a.code_path.map(c => esc(c.name)).join(' › ')}</p>
-      <div class="btn-row" style="margin-top:10px">${badge(a.condition, COND)} ${badge(a.status)} <span class="muted">NUP ${a.nup}</span></div>
+      <div class="btn-row" style="margin-top:10px">${badge(a.condition, COND)} ${badge(a.status)} <span class="muted">NUP ${a.nup}</span>
+        ${a.loan ? `<a class="badge info" href="#/aset-pemakaian">Dipakai ${esc(a.loan.borrower_name || '')} sejak ${fmt.date(a.loan.start_date)}${a.loan.due_date ? ' s.d. ' + fmt.date(a.loan.due_date) : ''}</a>` : ''}
+        ${a.acquisition ? `<a class="badge" href="#/aset-pembelian/${a.acquisition.id}">Pengadaan ${esc(a.acquisition.number)}</a>` : ''}</div>
       <div class="btn-row no-print" style="margin-top:16px"><a class="btn sm" href="#/aset">Kembali</a>
         ${can ? `<button class="btn sm" id="edit">Ubah data</button><button class="btn sm" id="cond">Ubah kondisi</button><button class="btn sm" id="mut">${I('move')} Mutasi</button>
-        <button class="btn sm" id="mnt">${I('wrench')} Catat perbaikan</button><button class="btn sm danger" id="disp">Hapuskan</button>` : ''}
+        <button class="btn sm" id="mnt">${I('wrench')} Catat perbaikan</button>${a.loan ? '' : `<button class="btn sm" id="loanB">${I('person')} Pemakaian</button>`}<button class="btn sm danger" id="disp">Hapuskan</button>` : ''}
         <button class="btn sm" id="lbl">${I('qr')} Cetak label</button><button class="btn sm" onclick="print()">${I('print')} Cetak kartu</button></div></div>
     <img class="qr" src="${API.url('/assets/' + a.id + '/qr.svg')}" alt="QR ${esc(a.tag)}"></div></div>
     <div class="grid2"><div class="panel"><div class="panel-head"><h3>Data aset</h3></div><div class="panel-body"><dl class="kv">
@@ -165,6 +168,7 @@ route(/^#\/aset\/(\d+)$/, async (view, [id]) => {
   $('#cond').onclick = () => UI.formModal({ title: 'Ubah kondisi', values: { condition: a.condition }, fields: [{ name: 'condition', label: 'Kondisi', type: 'select', empty: false, options: condOpts }, { name: 'note', label: 'Keterangan', type: 'textarea' },
     ...(a.room_id ? [{ name: 'report_damage', label: 'Catat juga sebagai kerusakan ruang (jika rusak)', type: 'checkbox' }] : [])], onSubmit: async v => { await API.post(`/assets/${id}/condition`, v); App.render(); } });
   $('#mut').onclick = () => Pages.mutationForm([a.id]);
+  const lb = $('#loanB'); if (lb) lb.onclick = () => Pages.loanForm([a.id]);
   $('#disp').onclick = () => Pages.disposeForm([a.id]);
   $('#mnt').onclick = () => UI.formModal({ title: 'Catat perbaikan', fields: [{ name: 'start_date', label: 'Tanggal mulai', type: 'date', default: fmt.ymd(new Date()) }, { name: 'vendor', label: 'Penyedia/teknisi' },
     { name: 'cost', label: 'Perkiraan biaya (Rp)', type: 'money' }, { name: 'description', label: 'Uraian kerusakan & perbaikan', type: 'textarea', required: true }], onSubmit: async v => { await API.post(`/assets/${id}/maintenance`, v); App.render(); } });
@@ -281,15 +285,15 @@ route(/^#\/opname\/(\d+)$/, async (view, [id]) => {
 // ---------- Persediaan ----------
 route(/^#\/persediaan$/, async (view, _, q) => {
   const rows = await API.get('/consumables', q);
-  view.innerHTML = App.head('Barang persediaan (habis pakai)', 'Kertas, spidol, toner, dan barang habis pakai lainnya. Pengeluaran dapat dibuatkan berita acara serah terima.',
-    App.canWrite() ? `<button class="btn primary" id="add">${I('plus')} Tambah barang</button>` : '') + `
+  view.innerHTML = App.head('Aset lancar: daftar barang persediaan', 'Barang habis pakai seperti kertas, spidol, dan toner. Gunakan menu Pembelian, Pemakaian, dan Stock opname untuk transaksi berdokumen; klik barang untuk kartu stok.',
+    App.canWrite() ? `<a class="btn" href="#/persediaan/pembelian">Pembelian</a><a class="btn" href="#/persediaan/pemakaian">Pemakaian</a><button class="btn primary" id="add">${I('plus')} Tambah barang</button>` : '') + `
     <div class="filters"><input type="search" data-f="q" placeholder="Cari barang" value="${esc(q.q || '')}"><label class="check"><input type="checkbox" id="low" ${q.low ? 'checked' : ''}> Hanya stok menipis</label></div>
-    <div class="panel">${UI.table({ rows, empty: 'Belum ada barang persediaan.', rowAttr: c => `class="click" data-c="${c.id}"`, columns: [{ label: 'Kode', render: c => `<span class="mono">${esc(c.code || '')}</span>` }, { label: 'Barang', key: 'name' },
+    <div class="panel">${UI.table({ rows, empty: 'Belum ada barang persediaan.', rowAttr: c => `class="click" data-c="${c.id}"`, columns: [{ label: 'Kode', render: c => `<span class="mono">${esc(c.code || '')}</span>` }, { label: 'Barang', render: c => `${esc(c.name)}${c.category ? `<br><small>${esc(c.category)}</small>` : ''}` },
       { label: 'Stok', num: true, render: c => `${fmt.num(c.stock, 2)} ${esc(c.uom)} ${Number(c.stock) <= Number(c.min_stock) ? '<span class="badge bad">menipis</span>' : ''}` }, { label: 'Min.', num: true, render: c => fmt.num(c.min_stock) },
       { label: 'Harga terakhir', num: true, render: c => fmt.rp(c.last_price) }, { label: 'Nilai stok', num: true, render: c => fmt.rp(c.stock * c.last_price) }, { label: 'Unit', key: 'unit_name' }] })}</div>`;
   bindFilters(view, '#/persediaan', q);
   $('#low').onchange = e => setQ('#/persediaan', { ...q, low: e.target.checked ? 1 : '' });
-  const F = [{ name: 'code', label: 'Kode barang' }, { name: 'name', label: 'Nama barang', required: true }, { name: 'uom', label: 'Satuan', default: 'pcs' }, { name: 'min_stock', label: 'Stok minimum', type: 'number', min: 0 },
+  const F = [{ name: 'code', label: 'Kode barang' }, { name: 'name', label: 'Nama barang', required: true }, { name: 'category', label: 'Kategori', placeholder: 'ATK, kebersihan, bahan lab…' }, { name: 'uom', label: 'Satuan', default: 'pcs' }, { name: 'min_stock', label: 'Stok minimum', type: 'number', min: 0 },
     ...(App.isSA() ? [{ name: 'unit_id', label: 'Unit', type: 'select', options: await Ref.opts('units', u => u.name) }] : [])];
   const add = $('#add'); if (add) add.onclick = () => UI.formModal({ title: 'Tambah barang persediaan', fields: F, onSubmit: async v => { await API.post('/consumables', v); App.render(); } });
   view.onclick = async e => {
@@ -330,7 +334,17 @@ route(/^#\/ba\/(\d+)$/, async (view, [id]) => {
   const d = new Date(b.ba_date + 'T00:00:00');
   const itemTable = (items, cols) => items && items.length ? `<table><thead><tr><th>No</th>${cols.map(x => `<th>${x[1]}</th>`).join('')}</tr></thead><tbody>${items.map((it, i) => `<tr><td>${i + 1}</td>${cols.map(x => `<td>${x[2] ? x[2](it[x[0]]) : esc(it[x[0]] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>` : '<p><i>Nihil.</i></p>';
   let isi = '';
-  if (b.ba_type === 'mutasi') isi = `<p>Telah dilakukan mutasi barang (${esc(c.mutation_number || '')}) dengan jenis <b>${esc(c.type || '')}</b>${c.to_room ? ` ke ruang <b>${esc(c.to_room.code)} — ${esc(c.to_room.name)}</b> (${esc(c.to_room.building)})` : ''}${c.to_holder ? ` kepada <b>${esc(c.to_holder.name)}</b>${c.to_holder.id_number ? ' (' + esc(c.to_holder.id_number) + ')' : ''}` : ''}, dengan alasan: ${esc(c.reason || '-')}. Rincian barang:</p>
+  const CN = v => esc((COND[v] || [v || '–'])[0]);
+  if (c.kind === 'penerimaan_aset') isi = `<p>Telah diterima barang milik negara/aset tetap dengan cara <b>${esc(c.method || '')}</b>${c.vendor ? ` dari <b>${esc(c.vendor)}</b>` : ''}${c.document_no ? ` berdasarkan ${esc(c.document_no)}` : ''} (pengadaan ${esc(c.acquisition_number)}), dengan rincian:</p>
+    ${itemTable(c.items, [['tag', 'Kode barang'], ['name', 'Nama barang'], ['price', 'Harga', fmt.rp]])}<p>Total nilai: <b>${fmt.rp(c.total)}</b>${c.funding_source ? ` · sumber dana ${esc(c.funding_source)}` : ''}.</p>`;
+  else if (c.kind === 'pemakaian_aset') isi = `<p>Telah diserahkan barang untuk dipakai oleh <b>${esc(c.receiver ? c.receiver.name : '')}</b>${c.receiver && c.receiver.id_number ? ` (${esc(c.receiver.id_number)})` : ''} untuk keperluan ${esc(c.purpose || '-')}${c.location ? ` di ${esc(c.location)}` : ''}, terhitung ${fmt.date(c.start_date)}${c.due_date ? ` sampai dengan ${fmt.date(c.due_date)}` : ''} (${esc(c.loan_number)}). Rincian:</p>
+    ${itemTable(c.items, [['tag', 'Kode barang'], ['name', 'Nama barang'], ['condition', 'Kondisi', CN], ['price', 'Nilai', fmt.rp]])}<p>Pemakai bertanggung jawab memelihara barang dan mengembalikannya dalam kondisi baik.</p>`;
+  else if (c.kind === 'pengembalian_aset') isi = `<p>Telah dikembalikan barang dari pemakaian ${esc(c.loan_number)} dengan rincian:</p>
+    ${itemTable(c.items, [['tag', 'Kode barang'], ['name', 'Nama barang'], ['condition_out', 'Kondisi saat diserahkan', CN], ['condition_in', 'Kondisi saat kembali', CN]])}${c.notes ? `<p>${esc(c.notes)}</p>` : ''}`;
+  else if (c.kind === 'pembelian') isi = `<p>Telah diterima barang persediaan${c.vendor ? ` dari <b>${esc(c.vendor)}</b>` : ''}${c.invoice_no ? ` dengan faktur ${esc(c.invoice_no)}` : ''} (${esc(c.doc_number)}):</p>${itemTable(c.items, [['code', 'Kode'], ['name', 'Nama'], ['qty', 'Jumlah'], ['uom', 'Satuan'], ['unit_price', 'Harga satuan', fmt.rp]])}`;
+  else if (c.kind === 'opname_persediaan') { const s = c.summary || {}; isi = `<p>Telah dilaksanakan stock opname barang persediaan (${esc(c.doc_number)}) atas ${s.items} jenis barang; ${s.checked} dihitung, ${s.diff_items} berselisih dengan nilai selisih ${fmt.rp(s.diff_value)}.</p>
+    ${itemTable(c.rows, [['code', 'Kode'], ['name', 'Nama'], ['uom', 'Satuan'], ['system_qty', 'Tercatat'], ['counted_qty', 'Hasil hitung', v => (v === null ? '–' : esc(v))], ['diff', 'Selisih', v => (v === null ? '–' : esc(v))], ['note', 'Catatan']])}`; }
+  else if (b.ba_type === 'mutasi') isi = `<p>Telah dilakukan mutasi barang (${esc(c.mutation_number || '')}) dengan jenis <b>${esc(c.type || '')}</b>${c.to_room ? ` ke ruang <b>${esc(c.to_room.code)} — ${esc(c.to_room.name)}</b> (${esc(c.to_room.building)})` : ''}${c.to_holder ? ` kepada <b>${esc(c.to_holder.name)}</b>${c.to_holder.id_number ? ' (' + esc(c.to_holder.id_number) + ')' : ''}` : ''}, dengan alasan: ${esc(c.reason || '-')}. Rincian barang:</p>
     ${itemTable(c.items, [['tag', 'Kode barang'], ['name', 'Nama barang'], ['room_code', 'Ruang asal'], ['holder', 'Pemegang asal'], ['condition', 'Kondisi', v => esc((COND[v] || [v])[0])], ['price', 'Nilai', fmt.rp]])}
     ${b.files && b.files.length ? `<p>Dokumen penyerta: ${b.files.map(f => `<a href="${API.file(f.id)}" target="_blank">${esc(f.title || f.file_name)}</a>`).join(', ')}</p>` : ''}`;
   else if (b.ba_type === 'penghapusan') isi = `<p>Telah dilakukan penghapusan barang dengan cara <b>${esc(c.method)}</b>, dengan alasan: ${esc(c.reason)}. Rincian:</p>${itemTable(c.items, [['tag', 'Kode barang'], ['name', 'Nama barang'], ['room_code', 'Ruang'], ['condition', 'Kondisi', v => esc((COND[v] || [v])[0])], ['price', 'Nilai perolehan', fmt.rp]])}

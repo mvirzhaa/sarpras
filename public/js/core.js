@@ -87,6 +87,8 @@ const I = (() => {
     img: 'M4 5h16v14H4zM4 15l4-4 5 5 3-3 4 4M15 9h.01', trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3', save: 'M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7',
     zin: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5M11 8v6M8 11h6', zout: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5M8 11h6', check: 'M5 12l5 5 9-10',
     ext: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6', up: 'M12 20V8M7 13l5-5 5 5M5 4h14', send: 'M4 12L20 4l-6 16-3-7zM11 13l9-9', sheet: 'M5 3h14v18H5zM5 9h14M5 15h14M11 3v18', layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5',
+    magnet: 'M7 16V8a5 5 0 0 1 10 0v8M5 16h4v4H5zM15 16h4v4h-4z',
+    wand: 'M4 20L14 10M18 3l.9 2 2 .9-2 .9-.9 2-.9-2-2-.9 2-.9zM21 9l.5 1.1 1.1.5-1.1.5-.5 1.1-.5-1.1-1.1-.5 1.1-.5z',
   };
   return (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${p[name] || p.doc}"/></svg>`;
 })();
@@ -293,9 +295,12 @@ const NAV = [
   ['Ruang & jadwal', [['#/gedung', 'Gedung & denah', 'building'], ['#/peta', 'Peta keterisian', 'map'], ['#/tabulasi', 'Tabulasi harian', 'grid'],
     ['#/jadwal', 'Jadwal ruang', 'cal'], ['#/cari-ruang', 'Cari ruang kosong', 'search'], ['#/peminjaman', 'Peminjaman', 'swap', 'pending'],
     ['#/penjadwalan', 'Penjadwalan kuliah', 'cpu', null, ['superadmin', 'unit_admin']], ['#/kerusakan', 'Kerusakan ruang', 'wrench'], ['#/masukan', 'Masukan publik', 'chat']]],
-  ['Aset', [['#/aset', 'Daftar aset', 'box'], ['#/kodefikasi', 'Kodefikasi BMN', 'tree'], ['#/mutasi', 'Mutasi barang', 'move'], ['#/opname', 'Stock opname', 'clip'],
-    ['#/persediaan', 'Persediaan', 'stack'], ['#/ba', 'Berita acara', 'doc'], ['#/valuasi', 'Valuasi aset', 'coin'], ['#/scan', 'Pindai QR', 'scan']]],
-  ['Laporan', [['#/laporan', 'Laporan', 'report']]],
+  ['Aset tetap', [['#/aset', 'Daftar aset', 'box'], ['#/aset-pembelian', 'Pembelian / pengadaan', 'plus'], ['#/aset-pemakaian', 'Pemakaian (pinjam pakai)', 'person'],
+    ['#/mutasi', 'Mutasi barang', 'move'], ['#/opname', 'Stock opname', 'clip'], ['#/valuasi', 'Valuasi & penyusutan', 'coin'], ['#/aset-laporan', 'Laporan aset tetap', 'report'],
+    ['#/aset-log', 'Log transaksi', 'log'], ['#/kodefikasi', 'Kodefikasi BMN', 'tree'], ['#/scan', 'Pindai QR', 'scan']]],
+  ['Aset lancar (persediaan)', [['#/persediaan', 'Daftar barang', 'stack'], ['#/persediaan/pembelian', 'Pembelian', 'dl'], ['#/persediaan/pemakaian', 'Pemakaian', 'ext'],
+    ['#/persediaan/opname', 'Stock opname', 'clip'], ['#/persediaan/laporan', 'Laporan persediaan', 'report'], ['#/persediaan/log', 'Log transaksi', 'log']]],
+  ['Laporan & dokumen', [['#/laporan', 'Laporan umum', 'report'], ['#/ba', 'Berita acara', 'doc']]],
   ['Pengaturan', [['#/unit', 'Unit pengelola', 'unit', null, ['superadmin', 'pimpinan']], ['#/pengguna', 'Pengguna', 'users', null, ['superadmin']],
     ['#/master/kategori', 'Kategori ruang', 'tag'], ['#/master/orang', 'Dosen & pegawai', 'person'], ['#/master/matkul', 'Mata kuliah', 'book'],
     ['#/master/periode', 'Periode akademik', 'cal'], ['#/master/sesi', 'Sesi kuliah', 'clock'], ['#/pengaturan', 'Organisasi', 'gear', null, ['superadmin']], ['#/audit', 'Log aktivitas', 'log', null, ['superadmin']]]],
@@ -317,7 +322,31 @@ const App = {
     if (App.me.must_change_password) setTimeout(() => Pages.password(true), 300);
     setInterval(App.refreshBadge, 60000);
   },
-  logout(expired) { localStorage.removeItem('sp_token'); API.token = null; if (expired) sessionStorage.setItem('sp_msg', 'Sesi Anda berakhir. Silakan masuk kembali.'); location.hash = ''; location.reload(); },
+  async impersonate(userId, unitId) {
+    const res = await API.post('/auth/impersonate', { user_id: userId, unit_id: unitId });
+    localStorage.setItem('sp_token_sa', localStorage.getItem('sp_token_sa') || API.token);
+    localStorage.setItem('sp_token', res.token); API.token = res.token;
+    sessionStorage.setItem('sp_msg_after', `Berhasil masuk sebagai ${res.user.name || res.user.username} (${res.user.unit_name}).`);
+    location.hash = '#/dashboard'; location.reload();
+  },
+  async stopImpersonate() {
+    const sa = localStorage.getItem('sp_token_sa');
+    try {
+      const res = await API.post('/auth/impersonate/stop', {});
+      localStorage.setItem('sp_token', res.token); API.token = res.token;
+    } catch {
+      if (sa) { localStorage.setItem('sp_token', sa); API.token = sa; }
+    }
+    localStorage.removeItem('sp_token_sa');
+    sessionStorage.setItem('sp_msg_after', 'Kembali sebagai Super Admin.');
+    location.hash = '#/unit'; location.reload();
+  },
+  logout(expired) {
+    const sa = localStorage.getItem('sp_token_sa');
+    localStorage.removeItem('sp_token_sa');
+    if (expired && sa && sa !== API.token) { localStorage.setItem('sp_token', sa); sessionStorage.setItem('sp_msg_after', 'Sesi masuk-sebagai berakhir. Anda kembali sebagai Super Admin.'); location.hash = '#/unit'; location.reload(); return; }
+    localStorage.removeItem('sp_token'); API.token = null; if (expired) sessionStorage.setItem('sp_msg', 'Sesi Anda berakhir. Silakan masuk kembali.'); location.hash = ''; location.reload();
+  },
   loginView() {
     const msg = sessionStorage.getItem('sp_msg'); sessionStorage.removeItem('sp_msg');
     document.body.innerHTML = `<div class="login"><div class="login-art">${Pages.blueprintArt ? Pages.blueprintArt() : ''}
@@ -340,12 +369,14 @@ const App = {
         const vis = items.filter(x => !x[4] || x[4].includes(role));
         return vis.length ? `<div class="nav-group">${g}</div>` + vis.map(([h, l, ic, cnt]) => `<a href="${h}">${I(ic)}<span>${l}</span>${cnt ? `<span class="count" data-count="${cnt}" hidden></span>` : ''}</a>`).join('') : '';
       }).join('')}</nav></aside>
-      <div class="main"><header class="topbar"><button class="btn ghost sm menu-btn" id="menuBtn" aria-label="Menu">${I('menu')}</button>
+      <div class="main">${App.me.impersonated_by ? `<div class="imp-bar no-print">${I('person')}<span>Anda sedang <b>masuk sebagai ${esc(App.me.name || App.me.username)}</b> (${esc(App.me.unit_name || '')}). Aktivitas tercatat atas nama Super Admin ${esc(App.me.impersonator_name || '')}.</span><button class="btn sm" id="impStop">Kembali ke Super Admin</button></div>` : ''}<header class="topbar"><button class="btn ghost sm menu-btn" id="menuBtn" aria-label="Menu">${I('menu')}</button>
         <div class="who"><button class="btn ghost sm" id="bell" aria-label="Notifikasi">${I('bell')}<span class="badge warn" id="unread" hidden></span></button>
         <span><b>${esc(App.me.name || App.me.username)}</b><br><small>${esc(App.me.unit_name || { superadmin: 'Super Admin', pimpinan: 'Pimpinan' }[role] || '')}</small></span>
-        <a href="#/akun" class="btn ghost sm">Akun</a><button class="btn sm" id="logout">Keluar</button></div></header>
+        <a href="#/akun" class="btn ghost sm">Akun</a><button class="btn sm" id="logout">${App.me.impersonated_by ? 'Akhiri' : 'Keluar'}</button></div></header>
       <main class="content" id="view"></main></div></div>`;
-    $('#logout').onclick = () => App.logout();
+    $('#logout').onclick = () => (App.me.impersonated_by ? App.stopImpersonate() : App.logout());
+    const st = $('#impStop'); if (st) st.onclick = () => App.stopImpersonate();
+    const am = sessionStorage.getItem('sp_msg_after'); if (am) { sessionStorage.removeItem('sp_msg_after'); setTimeout(() => UI.toast(am), 300); }
     $('#menuBtn').onclick = () => $('#side').classList.toggle('open');
     $('#bell').onclick = () => Pages.notifications();
     App.refreshBadge();
@@ -361,7 +392,9 @@ const App = {
   async render() {
     const h = location.hash || '#/dashboard';
     $('#side') && $('#side').classList.remove('open');
-    $$('.nav a').forEach(a => a.classList.toggle('active', h === a.getAttribute('href') || h.startsWith(a.getAttribute('href') + '/') || h.startsWith(a.getAttribute('href') + '?')));
+    const links = $$('.nav a'), hit = a => { const r = a.getAttribute('href'); return h === r || h.startsWith(r + '/') || h.startsWith(r + '?'); };
+    const best = links.filter(hit).sort((a, b) => b.getAttribute('href').length - a.getAttribute('href').length)[0];
+    links.forEach(a => a.classList.toggle('active', a === best));
     const [path, qs] = h.split('?');
     const q = Object.fromEntries(new URLSearchParams(qs || ''));
     const view = $('#view');

@@ -108,11 +108,11 @@ r.get('/consumables', ah(async (req, res) => {
   res.json(await db.q(`SELECT c.*, u.name unit_name, ac.code asset_code FROM consumables c LEFT JOIN units u ON u.id=c.unit_id
     LEFT JOIN asset_codes ac ON ac.id=c.asset_code_id WHERE ${w.join(' AND ')} ORDER BY c.name`, p));
 }));
-const CF = ['code', 'name', 'uom', 'asset_code_id', 'min_stock'];
+const CF = ['code', 'name', 'uom', 'asset_code_id', 'min_stock', 'category'];
 r.post('/consumables', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const d = pick(req.body, CF); d.unit_id = isSA(req.user) ? req.body.unit_id || null : req.user.unit_id;
-  res.status(201).json(await db.one(`INSERT INTO consumables (code,name,uom,asset_code_id,min_stock,unit_id) VALUES ($1,$2,COALESCE($3,'pcs'),$4,COALESCE($5,0),$6) RETURNING *`,
-    [d.code, d.name, d.uom, d.asset_code_id, d.min_stock, d.unit_id]));
+  res.status(201).json(await db.one(`INSERT INTO consumables (code,name,uom,asset_code_id,min_stock,unit_id,category) VALUES ($1,$2,COALESCE($3,'pcs'),$4,COALESCE($5,0),$6,$7) RETURNING *`,
+    [d.code, d.name, d.uom, d.asset_code_id, d.min_stock, d.unit_id, d.category]));
 }));
 async function guardConsumable(user, id) {
   const c = await db.one('SELECT * FROM consumables WHERE id=$1', [id]);
@@ -156,7 +156,7 @@ r.post('/consumables/:id/tx', roles('superadmin', 'unit_admin'), ah(async (req, 
     }
     const t = await c.one(`INSERT INTO consumable_tx (consumable_id,tx_type,qty,unit_price,tx_date,room_id,person_id,note,ba_id,created_by)
       VALUES ($1,$2,$3,COALESCE($4,0),COALESCE($5,current_date),$6,$7,$8,$9,$10) RETURNING *`,
-    [item.id, d.tx_type, Math.abs(qty), d.unit_price || item.last_price, d.tx_date, d.room_id, d.person_id, d.note, baId, req.user.id]);
+    [item.id, d.tx_type, d.tx_type === 'penyesuaian' ? qty : Math.abs(qty), d.unit_price || item.last_price, d.tx_date, d.room_id, d.person_id, d.note, baId, req.user.id]);
     await c.query(`UPDATE consumables SET stock=stock+$2, last_price=CASE WHEN $3::numeric > 0 AND $4='masuk' THEN $3::numeric ELSE last_price END WHERE id=$1`,
       [item.id, delta, Number(d.unit_price) || 0, d.tx_type]);
     return { ...t, ba_id: baId };
