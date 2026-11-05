@@ -4,7 +4,7 @@ const fs = require('fs');
 const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const { db, tx } = require('../db');
-const { ah, fail, pick, audit, setClause } = require('../util');
+const { ah, fail, pick, audit, setClause, orderBy } = require('../util');
 const { sign, signAs, authRequired, roles, isSA } = require('../auth');
 const crud = require('../crud');
 
@@ -91,10 +91,14 @@ r.put('/settings/:key', roles('superadmin'), ah(async (req, res) => {
   res.json({ ok: true });
 }));
 r.get('/audit', roles('superadmin'), ah(async (req, res) => {
-  const p = [], w = ['TRUE'];
-  if (req.query.entity) { p.push(req.query.entity); w.push(`a.entity=$${p.length}`); }
-  res.json(await db.q(`SELECT a.*, u.username FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE ${w.join(' AND ')}
-    ORDER BY a.at DESC LIMIT ${Math.min(Number(req.query.limit) || 200, 1000)} OFFSET ${Number(req.query.offset) || 0}`, p));
+  const p = [], w = ['TRUE'], q = req.query;
+  if (q.entity) { p.push(q.entity); w.push(`a.entity=$${p.length}`); }
+  if (q.q) { p.push(`%${q.q}%`); w.push(`(a.action ILIKE $${p.length} OR a.entity ILIKE $${p.length} OR u.username ILIKE $${p.length} OR a.data::text ILIKE $${p.length})`); }
+  const where = w.join(' AND '), limit = Math.min(Number(q.limit) || 200, 1000), offset = Number(q.offset) || 0;
+  const order = orderBy(q, { at: 'a.at', user: 'u.username', action: 'a.action', entity: 'a.entity' }, 'a.at DESC');
+  const rows = await db.q(`SELECT a.*, u.username FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE ${where} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`, p);
+  const total = (await db.one(`SELECT count(*) n FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE ${where}`, p)).n;
+  res.json({ rows, total });
 }));
 
 // ---------------- Lampiran ----------------

@@ -115,6 +115,10 @@ Pengelola efektif sebuah ruang ditentukan view `v_room_owner`: penugasan per rua
 - Laporan **harian, bulanan, semester**: utilisasi per ruang, kegiatan, rekap per unit penyelenggara (termasuk pemakaian ruang unit lain), beban mengajar dosen, peminjaman, masukan/keluhan, kerusakan, mutasi & perubahan aset, posisi & valuasi aset per ruang, perolehan baru, persediaan, berita acara. Cetak atau unduh Excel (satu sheet per bagian).
 - Notifikasi dalam aplikasi dan log aktivitas (audit).
 
+## Tabel: pencarian, filter, urut, paginasi
+
+Seluruh tabel (modul `public/js/tablekit.js`) otomatis memiliki kotak pencarian, filter kolom otomatis untuk kolom kategorikal, pengurutan A–Z/Z–A per kolom (angka, rupiah, tanggal Indonesia, dan teks natural dikenali otomatis; sel kosong selalu di bawah), serta paginasi 10/20/50/100 yang pilihannya disimpan. Cetak mencakup seluruh baris hasil saring. Untuk daftar besar (aset, log transaksi, log aktivitas) pengurutan dan paginasi dilakukan di server dengan daftar putih kolom (`orderBy` di `src/util.js`). Tabel dengan isian dinamis dikecualikan dengan atribut `data-tk-off`. Uji: `node test/tablekit.test.js`.
+
 ## Struktur
 
 ```

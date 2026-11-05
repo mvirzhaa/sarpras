@@ -1,7 +1,8 @@
 // ASET LANCAR (persediaan): pembelian, pemakaian, stock opname, log transaksi
 const express = require('express');
 const { db, tx } = require('../db');
-const { ah, fail, audit, nextNumber } = require('../util');
+const { ah, fail, audit, nextNumber, orderBy } = require('../util');
+const TSORT = { date: 't.tx_date', type: 't.tx_type', name: 'c.name', qty: 'signed_qty', price: 't.unit_price', doc: 'd.number', target: 'r.code', user: 'u.name' };
 const { roles, isSA, seesAll } = require('../auth');
 
 const r = express.Router();
@@ -153,7 +154,7 @@ r.get('/stock-log', ah(async (req, res) => {
   const rows = await db.q(`SELECT t.*, c.code, c.name, c.uom, d.number doc_number, d.doc_type, r.code room_code, p.name person_name, u.name created_by_name,
       CASE t.tx_type WHEN 'masuk' THEN t.qty WHEN 'keluar' THEN -t.qty ELSE t.qty END signed_qty
     FROM consumable_tx t JOIN consumables c ON c.id=t.consumable_id LEFT JOIN stock_docs d ON d.id=t.doc_id LEFT JOIN rooms r ON r.id=t.room_id
-    LEFT JOIN people p ON p.id=t.person_id LEFT JOIN users u ON u.id=t.created_by WHERE ${where} ORDER BY t.tx_date DESC, t.id DESC LIMIT ${limit} OFFSET ${offset}`, p);
+    LEFT JOIN people p ON p.id=t.person_id LEFT JOIN users u ON u.id=t.created_by WHERE ${where} ORDER BY ${orderBy(q, TSORT, 't.tx_date DESC, t.id DESC')} LIMIT ${limit} OFFSET ${offset}`, p);
   const sum = await db.one(`SELECT count(*) total, COALESCE(sum(t.qty*t.unit_price) FILTER (WHERE t.tx_type='masuk'),0) in_value,
       COALESCE(sum(t.qty*t.unit_price) FILTER (WHERE t.tx_type='keluar'),0) out_value
     FROM consumable_tx t JOIN consumables c ON c.id=t.consumable_id LEFT JOIN stock_docs d ON d.id=t.doc_id WHERE ${where}`, p);

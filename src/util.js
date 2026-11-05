@@ -42,4 +42,10 @@ function insertSql(table, obj) {
   const keys = Object.keys(obj);
   return { sql: `INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map((_, i) => '$' + (i + 1)).join(',')}) RETURNING *`, values: keys.map(k => obj[k]) };
 }
-module.exports = { HttpError, ah, fail, pick, nextNumber, ticket, audit, notifyUsers, notifyUnit, notifySuperadmins, setClause, insertSql, ROMAN };
+// ORDER BY aman: kunci urut dari klien dipetakan lewat daftar putih
+function orderBy(q, map, def) {
+  const cols = map[q.sort]; if (!cols) return def;
+  const dir = q.dir === 'desc' ? 'DESC' : 'ASC';
+  return cols.split(',').map(c => `${c.trim()} ${dir} NULLS LAST`).join(', ') + ', ' + def;
+}
+module.exports = { orderBy, HttpError, ah, fail, pick, nextNumber, ticket, audit, notifyUsers, notifyUnit, notifySuperadmins, setClause, insertSql, ROMAN };

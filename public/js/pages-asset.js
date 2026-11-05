@@ -55,7 +55,7 @@ const assetFields = async (edit) => [
   { name: 'notes', label: 'Catatan', type: 'textarea' }];
 
 route(/^#\/aset$/, async (view, _, q) => {
-  const limit = 100, page = Number(q.page) || 0;
+  const limit = TableKit.pageSize(), page = Number(q.page) || 0;
   const [res, blds, people] = await Promise.all([API.get('/assets', { ...q, limit, offset: page * limit }), Ref.get('buildings'), Ref.get('people')]);
   const rooms = await Ref.roomOpts(!App.isSA() && App.me.role !== 'pimpinan');
   view.innerHTML = App.head('Daftar aset', `${fmt.num(res.total)} aset · nilai perolehan ${fmt.rp(res.value)} · akumulasi penyusutan ${fmt.rp(res.acc)} · nilai buku ${fmt.rp(res.book)}`,
@@ -70,11 +70,11 @@ route(/^#\/aset$/, async (view, _, q) => {
     <div class="btn-row no-print" id="bulk" hidden style="margin-bottom:10px"><b id="nsel"></b>
       <button class="btn sm" data-b="mut">${I('move')} Mutasi</button><button class="btn sm" data-b="loan">${I('person')} Pemakaian</button><button class="btn sm" data-b="label">${I('qr')} Cetak label</button>
       <button class="btn sm" data-b="cond">Ubah kondisi</button><button class="btn sm danger" data-b="disp">Hapuskan</button></div>
-    <div class="panel" id="tbl">${UI.table({ rows: res.rows, select: App.canWrite() || true, empty: 'Belum ada aset pada filter ini.', rowAttr: a => `class="click" data-a="${a.id}"`, columns: [
-      { label: 'Kode aset', render: a => `<span class="tag">${esc(a.tag)}</span>` }, { label: 'Nama', render: a => `<b>${esc(a.name)}</b><br><small>${esc([a.brand, a.model].filter(Boolean).join(' ') || a.code_name)}</small>` },
-      { label: 'Penempatan', render: a => `${esc(a.room_code || '–')}${a.holder_name ? `<br><small>${esc(a.holder_name)}</small>` : ''}` }, { label: 'Kondisi', render: a => badge(a.condition, COND) },
-      { label: 'Perolehan', render: a => fmt.date(a.acquisition_date) }, { label: 'Harga', num: true, render: a => fmt.rp(a.price) }, { label: 'Nilai buku', num: true, render: a => fmt.rp(a.book_value) }] })}</div>
-    <div class="btn-row" style="margin-top:12px">${page > 0 ? `<button class="btn sm" data-pg="${page - 1}">‹ Sebelumnya</button>` : ''}<span class="muted">Halaman ${page + 1} dari ${Math.max(1, Math.ceil(res.total / limit))}</span>${(page + 1) * limit < res.total ? `<button class="btn sm" data-pg="${page + 1}">Berikutnya ›</button>` : ''}</div>`;
+    <div class="panel" id="tbl">${UI.table({ rows: res.rows, select: App.canWrite() || true, server: { sort: q.sort, dir: q.dir }, empty: 'Belum ada aset pada filter ini.', rowAttr: a => `class="click" data-a="${a.id}"`, columns: [
+      { label: 'Kode aset', sort: 'tag', render: a => `<span class="tag">${esc(a.tag)}</span>` }, { label: 'Nama', sort: 'name', render: a => `<b>${esc(a.name)}</b><br><small>${esc([a.brand, a.model].filter(Boolean).join(' ') || a.code_name)}</small>` },
+      { label: 'Penempatan', sort: 'room', render: a => `${esc(a.room_code || '–')}${a.holder_name ? `<br><small>${esc(a.holder_name)}</small>` : ''}` }, { label: 'Kondisi', sort: 'condition', render: a => badge(a.condition, COND) },
+      { label: 'Perolehan', sort: 'acquisition_date', render: a => fmt.date(a.acquisition_date) }, { label: 'Harga', sort: 'price', num: true, render: a => fmt.rp(a.price) }, { label: 'Nilai buku', sort: 'book_value', num: true, render: a => fmt.rp(a.book_value) }] })}</div>
+    ${TableKit.pager({ total: res.total, page, limit })}`;
   bindFilters(view, '#/aset', { ...q, page: '' });
   let sel = [];
   UI.bindSelect($('#tbl'), ids => { sel = ids; $('#bulk').hidden = !ids.length; $('#nsel').textContent = `${ids.length} dipilih`; });

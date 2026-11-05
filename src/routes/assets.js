@@ -1,7 +1,8 @@
 const express = require('express');
 const QRCode = require('qrcode');
 const { db, tx } = require('../db');
-const { ah, fail, pick, setClause, audit, nextNumber } = require('../util');
+const { ah, fail, pick, setClause, audit, nextNumber, orderBy } = require('../util');
+const ASORT = { tag: 'ac.code, a.nup', name: 'a.name', room: 'r.code', condition: 'a.condition', acquisition_date: 'a.acquisition_date', price: 'a.price', book_value: 'book_value' };
 const { roles, isSA, seesAll, canManageRoom, ownerUnit } = require('../auth');
 
 const r = express.Router();
@@ -116,7 +117,7 @@ r.get('/assets', ah(async (req, res) => {
   w.push(assetScope(req.user, p));
   const limit = Math.min(Number(q.limit) || 100, 5000), offset = Number(q.offset) || 0;
   const where = w.join(' AND ');
-  const rows = await db.q(`${ASSET_SQL} WHERE ${where} ORDER BY ac.code, a.nup LIMIT ${limit} OFFSET ${offset}`, p);
+  const rows = await db.q(`${ASSET_SQL} WHERE ${where} ORDER BY ${orderBy(q, ASORT, 'ac.code, a.nup')} LIMIT ${limit} OFFSET ${offset}`, p);
   const sum = await db.one(`SELECT count(*) total, COALESCE(sum(a.price),0) value, COALESCE(sum(${BOOK}),0) book, COALESCE(sum(${ACC}),0) acc FROM assets a JOIN asset_codes ac ON ac.id=a.asset_code_id
     LEFT JOIN rooms r ON r.id=a.room_id WHERE ${where}`, p);
   res.json({ rows, ...sum });

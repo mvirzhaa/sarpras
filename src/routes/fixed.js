@@ -1,7 +1,8 @@
 // ASET TETAP: pengadaan (pembelian/perolehan), pemakaian (pinjam pakai), log transaksi
 const express = require('express');
 const { db, tx } = require('../db');
-const { ah, fail, audit, nextNumber } = require('../util');
+const { ah, fail, audit, nextNumber, orderBy } = require('../util');
+const LSORT = { time: 'h.created_at', action: 'h.action', asset: 'a.tag', from: 'fr.code', to: 'tr.code', note: 'h.note', user: 'u.name' };
 const { roles, isSA, seesAll, canManageRoom, ownerUnit } = require('../auth');
 const { history, canManageAsset, assetScope } = require('./assets');
 
@@ -165,7 +166,7 @@ r.get('/asset-log', ah(async (req, res) => {
       fh.name from_holder, th.name to_holder, h.from_condition, h.to_condition, u.name user_name
     FROM asset_history h JOIN assets a ON a.id=h.asset_id LEFT JOIN rooms fr ON fr.id=h.from_room_id LEFT JOIN rooms tr ON tr.id=h.to_room_id
     LEFT JOIN people fh ON fh.id=h.from_holder_id LEFT JOIN people th ON th.id=h.to_holder_id LEFT JOIN users u ON u.id=h.user_id
-    WHERE ${where} ORDER BY h.created_at DESC, h.id DESC LIMIT ${limit} OFFSET ${offset}`, p);
+    WHERE ${where} ORDER BY ${orderBy(q, LSORT, 'h.created_at DESC, h.id DESC')} LIMIT ${limit} OFFSET ${offset}`, p);
   const total = (await db.one(`SELECT count(*) n FROM asset_history h JOIN assets a ON a.id=h.asset_id WHERE ${where}`, p)).n;
   res.json({ rows, total });
 }));

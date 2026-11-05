@@ -324,3 +324,29 @@ table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table.pl tr.pl-bad td { background: #FCF4F2; }
 .table.pl select { width: 100%; margin-top: 4px; font: 13px var(--font); padding: 5px 6px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
 .pl-cf { font-size: 12.5px; color: var(--red); }
+
+/* ---------- TableKit: pencarian, filter, urut, paginasi ---------- */
+.tk-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #FAFBFA; }
+.tk-bar input[type=search] { width: 230px; min-height: 32px; padding: 5px 10px; }
+.tk-bar select { width: auto; max-width: 210px; min-height: 32px; padding: 4px 8px; }
+.tk-count { margin-left: auto; font-size: 13px; }
+.tk-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.tk-th:hover { color: var(--ink); }
+.tk-th::after { content: '↕'; margin-left: 6px; opacity: .35; font-size: 11px; }
+.tk-th[aria-sort=ascending]::after { content: '▲'; opacity: 1; color: var(--brand); }
+.tk-th[aria-sort=descending]::after { content: '▼'; opacity: 1; color: var(--brand); }
+.tk-pager { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.tk-pager.out { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); margin-top: 10px; }
+.tk-pages { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.tk-pg { min-width: 32px; height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); background: #fff; border-radius: 4px; cursor: pointer; font: 600 13px var(--font); color: var(--ink); }
+.tk-pg:hover:not([disabled]) { border-color: var(--ink); }
+.tk-pg.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+.tk-pg[disabled] { opacity: .4; cursor: default; }
+.tk-gap { padding: 0 4px; color: var(--muted); }
+.tk-size select { width: auto; min-height: 30px; padding: 3px 8px; margin-left: 6px; }
+.tk-empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+tr[data-hp], tr[data-hf] { display: none; }
+@media print { .tk-bar, .tk-pager, .tk-empty { display: none !important; } tr[data-hp] { display: table-row !important; } tr[data-hf] { display: none !important; } .tk-th::after { content: none !important; } }
+
+/* atribut hidden harus selalu menang atas display bawaan komponen (.btn, .btn-row, dll.) */
+[hidden] { display: none !important; }

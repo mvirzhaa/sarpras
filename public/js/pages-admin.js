@@ -186,11 +186,13 @@ route(/^#\/pengaturan$/, async view => {
 
 // ---------- Log aktivitas ----------
 route(/^#\/audit$/, async (view, _, q) => {
-  const rows = await API.get('/audit', { entity: q.entity, offset: q.offset });
-  view.innerHTML = App.head('Log aktivitas', 'Jejak perubahan data oleh pengguna.') + `<div class="filters"><input data-f="entity" placeholder="Filter entitas, mis. assets" value="${esc(q.entity || '')}"></div>
-    <div class="panel">${UI.table({ rows, columns: [{ label: 'Waktu', render: a => fmt.dt(a.at) }, { label: 'Pengguna', render: a => esc(a.username || 'sistem') }, { label: 'Aksi', key: 'action' }, { label: 'Entitas', render: a => `${esc(a.entity)} #${a.entity_id || ''}` },
-      { label: 'Data', render: a => `<small class="mono" style="word-break:break-all">${esc(a.data ? JSON.stringify(a.data).slice(0, 160) : '')}</small>` }] })}</div>`;
-  bindFilters(view, '#/audit', q);
+  const page = Number(q.page) || 0, limit = TableKit.pageSize();
+  const res = await API.get('/audit', { entity: q.entity, q: q.q, sort: q.sort, dir: q.dir, limit, offset: page * limit }), rows = res.rows;
+  view.innerHTML = App.head('Log aktivitas', `Jejak perubahan data oleh pengguna (${fmt.num(res.total)} catatan). Aktivitas saat Super Admin masuk sebagai unit ditandai pada kolom Data.`) +
+    `<div class="filters"><input type="search" data-f="q" placeholder="Cari pengguna, aksi, entitas, data" value="${esc(q.q || '')}"><input data-f="entity" placeholder="Filter entitas, mis. assets" value="${esc(q.entity || '')}"></div>
+    <div class="panel">${UI.table({ rows, server: { sort: q.sort, dir: q.dir }, columns: [{ label: 'Waktu', sort: 'at', render: a => fmt.dt(a.at) }, { label: 'Pengguna', sort: 'user', render: a => esc(a.username || 'sistem') }, { label: 'Aksi', sort: 'action', key: 'action' },
+      { label: 'Entitas', sort: 'entity', render: a => `${esc(a.entity)} #${a.entity_id || ''}` }, { label: 'Data', render: a => `<small class="mono" style="word-break:break-all">${esc(a.data ? JSON.stringify(a.data).slice(0, 160) : '')}</small>` }] })}</div>${TableKit.pager({ total: res.total, page, limit })}`;
+  bindFilters(view, '#/audit', { ...q, page: '' });
 });
 
 // ---------- Laporan ----------

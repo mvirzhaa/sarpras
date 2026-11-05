@@ -199,16 +199,21 @@ const UI = {
     });
   },
   // ---- Tabel ----
-  table({ columns, rows, empty = 'Belum ada data.', rowAttr, foot, select }) {
+  table({ columns, rows, empty = 'Belum ada data.', rowAttr, foot, select, noKit, server }) {
     if (!rows || !rows.length) return `<div class="empty">${empty}</div>`;
-    const th = (select ? '<th style="width:32px"><input type="checkbox" data-selall aria-label="Pilih semua"></th>' : '') + columns.map(c => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('');
+    const th = (select ? '<th style="width:32px"><input type="checkbox" data-selall aria-label="Pilih semua"></th>' : '') + columns.map(c => {
+      if (server && c.sort) { const on = server.sort === c.sort; return `<th class="${c.num ? 'num ' : ''}tk-th" data-ssort="${c.sort}" tabindex="0" aria-sort="${on ? (server.dir === 'desc' ? 'descending' : 'ascending') : 'none'}" title="Klik untuk mengurutkan A–Z / Z–A">${esc(c.label)}</th>`; }
+      return `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`;
+    }).join('');
     const tr = rows.map((r, i) => `<tr ${rowAttr ? rowAttr(r, i) : ''}>${select ? `<td><input type="checkbox" data-sel="${r.id}" aria-label="Pilih"></td>` : ''}${columns.map(c => `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r, i) : esc(r[c.key] ?? '')}</td>`).join('')}</tr>`).join('');
-    return `<div class="table-wrap"><table class="t"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody>${foot ? `<tfoot><tr>${select ? '<td></td>' : ''}${foot}</tr></tfoot>` : ''}</table></div>`;
+    return `<div class="table-wrap"${noKit ? ' data-tk-off' : ''}${server ? ' data-tk-server' : ''}><table class="t"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody>${foot ? `<tfoot><tr>${select ? '<td></td>' : ''}${foot}</tr></tfoot>` : ''}</table></div>`;
   },
   bindSelect(root, onChange) {
     const all = $('[data-selall]', root);
     const get = () => $$('[data-sel]:checked', root).map(x => Number(x.dataset.sel));
-    if (all) all.onchange = () => { $$('[data-sel]', root).forEach(x => (x.checked = all.checked)); onChange(get()); };
+    // "pilih semua" hanya untuk baris yang sedang tampil (sesuai pencarian/filter dan halaman)
+    const visible = x => { const tr = x.closest('tr'); return !tr.hasAttribute('data-hp') && !tr.hasAttribute('data-hf'); };
+    if (all) all.onchange = () => { $$('[data-sel]', root).filter(visible).forEach(x => (x.checked = all.checked)); onChange(get()); };
     $$('[data-sel]', root).forEach(x => (x.onchange = () => onChange(get())));
     return get;
   },

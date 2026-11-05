@@ -125,7 +125,7 @@ route(/^#\/aset-pemakaian$/, async (view, _, q) => {
     const b = e.target.closest('[data-ret]'); if (!b) return;
     const l = rows.find(x => x.id === Number(b.dataset.ret));
     const m = UI.modal({ title: `Pengembalian ${l.number}`, wide: true, body: `<p>Pemakai: <b>${esc(l.borrower_name || '')}</b>. Periksa kondisi setiap barang saat diterima kembali.</p>
-      ${UI.table({ rows: l.items, columns: [{ label: 'Kode aset', render: i => `<span class="tag">${esc(i.tag)}</span>` }, { label: 'Nama', key: 'name' }, { label: 'Kondisi saat diserahkan', render: i => badge(i.condition_out, COND) },
+      ${UI.table({ noKit: true, rows: l.items, columns: [{ label: 'Kode aset', render: i => `<span class="tag">${esc(i.tag)}</span>` }, { label: 'Nama', key: 'name' }, { label: 'Kondisi saat diserahkan', render: i => badge(i.condition_out, COND) },
         { label: 'Kondisi saat kembali', render: i => `<select data-cin="${i.id}" style="width:auto">${UI.options(condOpts, i.condition_out)}</select>` }] })}
       <div class="form-grid" style="margin-top:12px">${UI.field({ name: 'returned_date', label: 'Tanggal kembali', type: 'date' }, fmt.ymd(new Date()))}${UI.field({ name: 'notes', label: 'Catatan', type: 'textarea' })}</div>`,
     actions: [{ label: 'Batal' }, { label: 'Simpan pengembalian', kind: 'primary', onClick: async () => {
@@ -155,18 +155,18 @@ route(/^#\/aset-laporan$/, async (view, _, q) => {
 });
 const LOG_ACT = { registrasi: 'Registrasi', mutasi: 'Mutasi', kondisi: 'Perubahan kondisi', perbaikan: 'Perbaikan', opname: 'Stock opname', penghapusan: 'Penghapusan', ubah_data: 'Ubah data', dipakai: 'Pemakaian', dikembalikan: 'Pengembalian' };
 route(/^#\/aset-log$/, async (view, _, q) => {
-  const page = Number(q.page) || 0, limit = 200;
+  const page = Number(q.page) || 0, limit = TableKit.pageSize();
   const res = await API.get('/asset-log', { ...q, limit, offset: page * limit });
   view.innerHTML = App.head('Log transaksi aset tetap', `${fmt.num(res.total)} transaksi: registrasi, mutasi, pemakaian & pengembalian, perubahan kondisi, perbaikan, opname, penghapusan.`, `<button class="btn" id="csv">${I('dl')} Unduh CSV</button>`) + `
     <div class="filters"><input type="search" data-f="q" placeholder="Kode aset, nama, keterangan" value="${esc(q.q || '')}">
       <select data-f="action"><option value="">Semua transaksi</option>${UI.options(Object.entries(LOG_ACT).map(([k, v]) => ({ value: k, label: v })), q.action)}</select>
       <input type="date" data-f="from" value="${esc(q.from || '')}" style="width:auto" aria-label="Dari"><input type="date" data-f="to" value="${esc(q.to || '')}" style="width:auto" aria-label="Sampai"></div>
-    <div class="panel">${UI.table({ rows: res.rows, empty: 'Tidak ada transaksi.', rowAttr: h => `class="click" data-a="${h.asset_id}"`, columns: [{ label: 'Waktu', render: h => fmt.dt(h.created_at) },
-      { label: 'Transaksi', render: h => `<b>${esc(LOG_ACT[h.action] || h.action)}</b>` }, { label: 'Aset', render: h => `<span class="tag">${esc(h.tag)}</span><br><small>${esc(h.name)}</small>` },
-      { label: 'Dari', render: h => esc([h.from_room, h.from_holder, h.from_condition && (COND[h.from_condition] || [h.from_condition])[0]].filter(Boolean).join(' / ') || '–') },
-      { label: 'Ke', render: h => esc([h.to_room, h.to_holder, h.to_condition && (COND[h.to_condition] || [h.to_condition])[0]].filter(Boolean).join(' / ') || '–') },
-      { label: 'Keterangan', render: h => esc(h.note || '') }, { label: 'Petugas', render: h => esc(h.user_name || 'sistem') }] })}</div>
-    <div class="btn-row" style="margin-top:12px">${page > 0 ? `<button class="btn sm" data-pg="${page - 1}">‹ Sebelumnya</button>` : ''}<span class="muted">Halaman ${page + 1} dari ${Math.max(1, Math.ceil(res.total / limit))}</span>${(page + 1) * limit < res.total ? `<button class="btn sm" data-pg="${page + 1}">Berikutnya ›</button>` : ''}</div>`;
+    <div class="panel">${UI.table({ rows: res.rows, empty: 'Tidak ada transaksi.', server: { sort: q.sort, dir: q.dir }, rowAttr: h => `class="click" data-a="${h.asset_id}"`, columns: [{ label: 'Waktu', sort: 'time', render: h => fmt.dt(h.created_at) },
+      { label: 'Transaksi', sort: 'action', render: h => `<b>${esc(LOG_ACT[h.action] || h.action)}</b>` }, { label: 'Aset', sort: 'asset', render: h => `<span class="tag">${esc(h.tag)}</span><br><small>${esc(h.name)}</small>` },
+      { label: 'Dari', sort: 'from', render: h => esc([h.from_room, h.from_holder, h.from_condition && (COND[h.from_condition] || [h.from_condition])[0]].filter(Boolean).join(' / ') || '–') },
+      { label: 'Ke', sort: 'to', render: h => esc([h.to_room, h.to_holder, h.to_condition && (COND[h.to_condition] || [h.to_condition])[0]].filter(Boolean).join(' / ') || '–') },
+      { label: 'Keterangan', sort: 'note', render: h => esc(h.note || '') }, { label: 'Petugas', sort: 'user', render: h => esc(h.user_name || 'sistem') }] })}</div>
+    ${TableKit.pager({ total: res.total, page, limit })}`;
   bindFilters(view, '#/aset-log', { ...q, page: '' });
   $('#csv').onclick = async () => { const all = await API.get('/asset-log', { ...q, limit: 5000, offset: 0 });
     csvDownload('log-aset-tetap.csv', ['waktu', 'transaksi', 'kode_aset', 'nama', 'dari', 'ke', 'keterangan', 'petugas'], all.rows.map(h => [fmt.dt(h.created_at), LOG_ACT[h.action] || h.action, h.tag, h.name,
@@ -191,7 +191,7 @@ Pages.stockDocForm = async (type) => {
   const row = () => `<tr class="si"><td><select data-k="consumable_id"><option value="">— pilih barang —</option>${UI.options(opts)}</select></td><td><input type="number" step="any" min="0" data-k="qty" style="width:100px"></td>
     <td><input type="number" min="0" data-k="unit_price" style="width:140px" ${beli ? '' : 'placeholder="harga terakhir"'}></td><td class="num sub">–</td><td><input data-k="note" placeholder="keterangan"></td><td><button class="btn ghost sm" data-rmr aria-label="Hapus baris">${I('trash')}</button></td></tr>`;
   const m = UI.modal({ title: beli ? 'Pembelian barang persediaan' : 'Pemakaian barang persediaan', wide: true, body: `<div id="sdh">${UI.form(head)}</div>
-    <div class="table-wrap" style="margin-top:16px"><table class="t"><thead><tr><th>Barang</th><th>Jumlah</th><th>Harga satuan</th><th class="num">Subtotal</th><th>Ket.</th><th></th></tr></thead><tbody id="srows">${row()}</tbody>
+    <div class="table-wrap" data-tk-off style="margin-top:16px"><table class="t"><thead><tr><th>Barang</th><th>Jumlah</th><th>Harga satuan</th><th class="num">Subtotal</th><th>Ket.</th><th></th></tr></thead><tbody id="srows">${row()}</tbody>
     <tfoot><tr><td colspan="3"><button class="btn sm" id="addRow">${I('plus')} Tambah baris</button></td><td class="num" id="stot">Rp 0</td><td colspan="2"></td></tr></tfoot></table></div>
     <label class="check" style="margin-top:12px"><input type="checkbox" id="mkba" checked> Terbitkan berita acara ${beli ? 'penerimaan' : 'serah terima'}</label>`,
   actions: [{ label: 'Batal' }, { label: 'Simpan & posting', kind: 'primary', onClick: async () => {
@@ -291,7 +291,7 @@ route(/^#\/persediaan\/laporan$/, async (view, _, q) => {
   $('#rep').innerHTML = Pages.reportBody(await API.get('/reports/persediaan', { ...params, unit_id: q.unit_id }));
 });
 route(/^#\/persediaan\/log$/, async (view, _, q) => {
-  const page = Number(q.page) || 0, limit = 200;
+  const page = Number(q.page) || 0, limit = TableKit.pageSize();
   const [res, items] = await Promise.all([API.get('/stock-log', { ...q, limit, offset: page * limit }), API.get('/consumables')]);
   const TT = { masuk: ['Masuk', 'ok'], keluar: ['Keluar', 'warn'], penyesuaian: ['Penyesuaian', 'info'] };
   view.innerHTML = App.head('Log transaksi persediaan', `${fmt.num(res.total)} transaksi · nilai masuk ${fmt.rp(res.in_value)} · nilai keluar ${fmt.rp(res.out_value)}`, `<button class="btn" id="csv">${I('dl')} Unduh CSV</button>`) + `
@@ -299,11 +299,11 @@ route(/^#\/persediaan\/log$/, async (view, _, q) => {
       <select data-f="consumable_id"><option value="">Semua barang</option>${UI.options(items.map(c => ({ value: c.id, label: c.name })), q.consumable_id)}</select>
       <select data-f="type"><option value="">Semua jenis</option>${UI.options(Object.entries(TT).map(([k, v]) => ({ value: k, label: v[0] })), q.type)}</select>
       <input type="date" data-f="from" value="${esc(q.from || '')}" style="width:auto" aria-label="Dari"><input type="date" data-f="to" value="${esc(q.to || '')}" style="width:auto" aria-label="Sampai"></div>
-    <div class="panel">${UI.table({ rows: res.rows, empty: 'Tidak ada transaksi.', rowAttr: t => (t.doc_id ? `class="click" data-go="#/persediaan/dok/${t.doc_id}"` : ''), columns: [{ label: 'Tanggal', render: t => fmt.date(t.tx_date) },
-      { label: 'Jenis', render: t => badge(t.tx_type, TT) }, { label: 'Barang', render: t => `${esc(t.name)}<br><small class="mono">${esc(t.code || '')}</small>` },
-      { label: 'Jumlah', num: true, render: t => `${t.signed_qty > 0 ? '+' : ''}${fmt.num(t.signed_qty, 2)} ${esc(t.uom)}` }, { label: 'Harga', num: true, render: t => fmt.rp(t.unit_price) },
-      { label: 'Dokumen', render: t => esc(t.doc_number || '–') }, { label: 'Untuk', render: t => esc([t.room_code, t.person_name].filter(Boolean).join(' / ') || '–') }, { label: 'Petugas', render: t => esc(t.created_by_name || '') }] })}</div>
-    <div class="btn-row" style="margin-top:12px">${page > 0 ? `<button class="btn sm" data-pg="${page - 1}">‹ Sebelumnya</button>` : ''}<span class="muted">Halaman ${page + 1} dari ${Math.max(1, Math.ceil(res.total / limit))}</span>${(page + 1) * limit < res.total ? `<button class="btn sm" data-pg="${page + 1}">Berikutnya ›</button>` : ''}</div>`;
+    <div class="panel">${UI.table({ rows: res.rows, empty: 'Tidak ada transaksi.', server: { sort: q.sort, dir: q.dir }, rowAttr: t => (t.doc_id ? `class="click" data-go="#/persediaan/dok/${t.doc_id}"` : ''), columns: [{ label: 'Tanggal', sort: 'date', render: t => fmt.date(t.tx_date) },
+      { label: 'Jenis', sort: 'type', render: t => badge(t.tx_type, TT) }, { label: 'Barang', sort: 'name', render: t => `${esc(t.name)}<br><small class="mono">${esc(t.code || '')}</small>` },
+      { label: 'Jumlah', sort: 'qty', num: true, render: t => `${t.signed_qty > 0 ? '+' : ''}${fmt.num(t.signed_qty, 2)} ${esc(t.uom)}` }, { label: 'Harga', sort: 'price', num: true, render: t => fmt.rp(t.unit_price) },
+      { label: 'Dokumen', sort: 'doc', render: t => esc(t.doc_number || '–') }, { label: 'Untuk', sort: 'target', render: t => esc([t.room_code, t.person_name].filter(Boolean).join(' / ') || '–') }, { label: 'Petugas', sort: 'user', render: t => esc(t.created_by_name || '') }] })}</div>
+    ${TableKit.pager({ total: res.total, page, limit })}`;
   bindFilters(view, '#/persediaan/log', { ...q, page: '' });
   $('#csv').onclick = async () => { const all = await API.get('/stock-log', { ...q, limit: 5000, offset: 0 });
     csvDownload('log-persediaan.csv', ['tanggal', 'jenis', 'kode', 'barang', 'jumlah', 'satuan', 'harga', 'dokumen', 'untuk', 'keterangan', 'petugas'], all.rows.map(t => [t.tx_date, t.tx_type, t.code, t.name, t.signed_qty, t.uom, t.unit_price, t.doc_number, [t.room_code, t.person_name].filter(Boolean).join(' / '), t.note, t.created_by_name])); };

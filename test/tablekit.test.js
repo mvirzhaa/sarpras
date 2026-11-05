@@ -1,0 +1,32 @@
+// Uji logika TableKit (bacaan angka/tanggal, deteksi tipe, urutan, daftar halaman): node test/tablekit.test.js
+const fs = require('fs'), vm = require('vm');
+const code = fs.readFileSync(__dirname + '/../public/js/tablekit.js', 'utf8').replace("'use strict';", '') + '\n;globalThis.__TK = TableKit;';
+const ctx = { localStorage: { getItem: () => null, setItem() {} }, console, Intl, Set, Date, Number, Math, Object, String, Array, parseFloat, document: undefined };
+ctx.globalThis = ctx; vm.createContext(ctx); vm.runInContext(code, ctx);
+const T = ctx.__TK._t; let fail = 0;
+const eq = (name, a, b) => { const ok = JSON.stringify(a) === JSON.stringify(b); if (!ok) { fail++; console.log('GAGAL', name, a, '!=', b); } };
+eq('rp', T.parseNum('Rp 1.500.000'), 1500000);
+eq('persen', T.parseNum('12,5%'), 12.5);
+eq('angka id', T.parseNum('1.234,5'), 1234.5);
+eq('negatif', T.parseNum('Rp -500'), -500);
+eq('satuan', T.parseNum('45 orang'), 45);
+eq('kode bukan angka', Number.isNaN(T.parseNum('3.10.01.02.001')), true);
+eq('kode aset bukan angka', Number.isNaN(T.parseNum('3.10.01.02.001.00012')), true);
+eq('teks bukan angka', Number.isNaN(T.parseNum('Ruang 101')), true);
+eq('tanggal id', new Date(T.parseDate('5 Mei 2026')).getMonth(), 4);
+eq('tanggal+jam', new Date(T.parseDate('30 Okt 2026, 14.30')).getHours(), 14);
+eq('tanggal iso', new Date(T.parseDate('2026-10-30')).getDate(), 30);
+eq('tanggal dmy', new Date(T.parseDate('30/10/2026 08:15')).getMinutes(), 15);
+eq('tipe angka', T.detect(['10', '2', '–', '300']), 'num');
+eq('tipe rupiah', T.detect(['Rp 1.000', 'Rp 25.000']), 'num');
+eq('tipe tanggal', T.detect(['1 Jan 2026', '3 Feb 2025', '–']), 'date');
+eq('tipe teks', T.detect(['Baik', 'Rusak']), 'str');
+eq('tipe campur', T.detect(['10', 'abc']), 'str');
+eq('halaman awal', T._t, undefined);
+eq('daftar hal 1/3', T.pageList(0, 3), [0, 1, 2]);
+eq('daftar hal tengah', T.pageList(5, 12), [0, '…', 4, 5, 6, '…', 11]);
+eq('daftar hal akhir', T.pageList(11, 12), [0, '…', 10, 11]);
+// urutan: angka vs teks pada data campuran, kosong di bawah
+const coll = new Intl.Collator('id', { numeric: true, sensitivity: 'base' });
+eq('urut teks natural', ['Ruang 10', 'Ruang 2', 'ruang 1'].sort(coll.compare), ['ruang 1', 'Ruang 2', 'Ruang 10']);
+console.log(fail ? `${fail} uji gagal` : 'semua uji TableKit lulus'); process.exit(fail ? 1 : 0);
