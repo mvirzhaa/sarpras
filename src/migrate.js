@@ -124,3 +124,10 @@ const STEPS = [
 module.exports = async function migrate() {
   for (const q of STEPS) await pool.query(q);
 };
+
+if (require.main === module) {
+  require('dotenv').config();
+  module.exports()
+    .then(() => { console.log('✔ Migrasi skema database berhasil.'); pool.end(); })
+    .catch(e => { console.error('✖ Migrasi gagal:', e.message); pool.end(); process.exit(1); });
+}
