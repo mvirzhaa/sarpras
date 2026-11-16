@@ -9,7 +9,7 @@ const morgan = require('morgan');
 const { HttpError } = require('./util');
 
 // Sumber ubin peta (bisa diganti lewat .env: TILE_HOSTS=https://tiles.kampus.ac.id,...)
-const TILE_HOSTS = (process.env.TILE_HOSTS || 'https://tile.openstreetmap.org,https://*.tile.openstreetmap.org,https://server.arcgisonline.com').split(',').map(s => s.trim()).filter(Boolean);
+const TILE_HOSTS = (process.env.TILE_HOSTS || 'https://*.basemaps.cartocdn.com,https://basemaps.cartocdn.com,https://server.arcgisonline.com,https://*.arcgisonline.com,https://tile.openstreetmap.org,https://*.tile.openstreetmap.org').split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
 app.set('trust proxy', 1);

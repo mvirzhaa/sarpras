@@ -9,7 +9,18 @@
   const styleFor = base => ({
     version: 8,
     sources: {
-      osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap' },
+      osm: {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+          'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+          'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+          'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: '© OpenStreetMap, © CARTO',
+      },
       sat: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19, attribution: 'Citra © Esri' },
     },
     layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#E6ECE7' } },
