@@ -667,3 +667,48 @@ CREATE TABLE IF NOT EXISTS stock_doc_items (
 );
 ALTER TABLE consumable_tx ADD COLUMN IF NOT EXISTS doc_id int REFERENCES stock_docs(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS consumable_tx_date_idx ON consumable_tx(tx_date);
+
+-- =====================================================================
+-- PETA KAMPUS 2D/3D: penempatan gedung, tinggi lantai, warna dinding
+--  buildings.latitude/longitude = titik pusat gedung di peta (null = belum ditempatkan)
+--  map_footprint = poligon tapak gedung dalam meter lokal [timur, utara] terhadap titik pusat
+--  map_rotation  = putaran tapak searah jarum jam dari utara (derajat)
+-- =====================================================================
+ALTER TABLE buildings ADD COLUMN IF NOT EXISTS map_rotation numeric(6,2) NOT NULL DEFAULT 0;
+ALTER TABLE buildings ADD COLUMN IF NOT EXISTS map_footprint jsonb;
+ALTER TABLE buildings ADD COLUMN IF NOT EXISTS wall_color varchar(9) NOT NULL DEFAULT '#C9B79C';
+ALTER TABLE buildings ADD COLUMN IF NOT EXISTS roof_color varchar(9);
+ALTER TABLE floors ADD COLUMN IF NOT EXISTS floor_height numeric(5,2) NOT NULL DEFAULT 4;
+ALTER TABLE floors ADD COLUMN IF NOT EXISTS wall_color varchar(9);
+
+-- =====================================================================
+-- SUB UNIT (mis. program studi di bawah fakultas)
+--  Unit (fakultas) memiliki banyak sub unit. Kelas/jadwal kuliah dapat dimasukkan
+--  pada tingkat unit (sub_unit_id NULL = seluruh fakultas) atau per sub unit.
+--  Pengelola sub unit: admin unit (fakultas) atau admin sub unit (prodi) itu sendiri.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS sub_units (
+  id          serial PRIMARY KEY,
+  unit_id     int NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  code        varchar(20) NOT NULL,
+  name        varchar(150) NOT NULL,
+  kind        varchar(20) NOT NULL DEFAULT 'prodi' CHECK (kind IN ('prodi','jurusan','bagian','lainnya')),
+  description text,
+  head_name   varchar(150),
+  head_nip    varchar(40),
+  email       varchar(150),
+  phone       varchar(40),
+  active      boolean NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (unit_id, code)
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE CASCADE;   -- NULL = admin tingkat unit
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_sub_primary boolean NOT NULL DEFAULT false;               -- akun admin otomatis milik sub unit
+ALTER TABLE people ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL;
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL;
+ALTER TABLE course_classes ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL;  -- NULL = tingkat unit
+ALTER TABLE timetable_runs ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE CASCADE;   -- NULL = seluruh unit
+ALTER TABLE events ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS cc_sub_idx ON course_classes(sub_unit_id);
+CREATE INDEX IF NOT EXISTS events_sub_idx ON events(sub_unit_id);
+

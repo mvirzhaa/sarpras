@@ -3,10 +3,11 @@ const QRCode = require('qrcode');
 const { db, tx } = require('../db');
 const { ah, fail, pick, setClause, insertSql, audit } = require('../util');
 const { roles, isSA, assertRoom, canManageRoom } = require('../auth');
+const G = require('../../public/js/mapgeo.js');
 
 const r = express.Router();
 const BFIELDS = ['code', 'name', 'address', 'latitude', 'longitude', 'year_built', 'floors_count', 'building_area', 'land_area',
-  'ownership', 'certificate_no', 'permit_no', 'slf_no', 'condition', 'acquisition_value', 'description'];
+  'ownership', 'certificate_no', 'permit_no', 'slf_no', 'condition', 'acquisition_value', 'description', 'wall_color', 'roof_color'];
 
 // ---------------- Gedung ----------------
 r.get('/buildings', ah(async (req, res) => {
@@ -51,11 +52,61 @@ r.delete('/buildings/:id', roles('superadmin'), ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------------- Peta kampus 2D/3D ----------------
+function checkFloorMap(d) {
+  if (d.floor_height != null && !(Number(d.floor_height) >= 2 && Number(d.floor_height) <= 30)) fail(400, 'Tinggi lantai harus 2–30 meter');
+  if (d.wall_color != null && !G.HEX.test(d.wall_color)) fail(400, 'Warna dinding harus berformat #RRGGBB');
+}
+const mapBuildings = async (onlyId) => {
+  const rows = await db.q(`SELECT b.id, b.code, b.name, b.address, b.latitude, b.longitude, b.map_rotation, b.map_footprint, b.wall_color, b.roof_color, b.floors_count, b.building_area,
+      (SELECT count(*) FROM rooms r WHERE r.building_id=b.id) room_total FROM buildings b ${onlyId ? 'WHERE b.id=$1' : ''} ORDER BY b.code`, onlyId ? [onlyId] : []);
+  const ids = rows.map(b => b.id);
+  const floors = ids.length ? await db.q('SELECT id, building_id, level, name, floor_height, wall_color FROM floors WHERE building_id = ANY($1) ORDER BY level', [ids]) : [];
+  const rooms = ids.length ? await db.q('SELECT building_id, floor_id, shape FROM rooms WHERE building_id = ANY($1)', [ids]) : [];
+  return rows.map(b => {
+    const bf = floors.filter(f => f.building_id === b.id).map(f => ({ ...f, floor_height: Number(f.floor_height) }));
+    let fp = b.map_footprint, auto = null;
+    if (!Array.isArray(fp) || fp.length < 3) { fp = G.derive(rooms.filter(r => r.building_id === b.id)); auto = fp ? 'denah' : null; if (!fp) { fp = G.fallback(b.building_area, bf.length || b.floors_count); auto = 'perkiraan'; } }
+    return { ...b, latitude: b.latitude == null ? null : Number(b.latitude), longitude: b.longitude == null ? null : Number(b.longitude), map_rotation: Number(b.map_rotation),
+      footprint: fp, footprint_source: auto || 'manual', floors: bf, total_height: G.totalHeight({ floors: bf }) };
+  });
+};
+r.get('/map/buildings', ah(async (req, res) => { res.json({ rows: await mapBuildings() }); }));
+r.get('/buildings/:id/map', ah(async (req, res) => { const [b] = await mapBuildings(req.params.id); if (!b) fail(404, 'Gedung tidak ditemukan'); res.json(b); }));
+r.put('/buildings/:id/map', roles('superadmin'), ah(async (req, res) => {
+  const d = pick(req.body, ['latitude', 'longitude', 'map_rotation', 'map_footprint', 'wall_color', 'roof_color']);
+  if (d.latitude != null && !(Math.abs(Number(d.latitude)) <= 90)) fail(400, 'Lintang tidak valid');
+  if (d.longitude != null && !(Math.abs(Number(d.longitude)) <= 180)) fail(400, 'Bujur tidak valid');
+  if ((d.latitude == null) !== (d.longitude == null) && 'latitude' in d && 'longitude' in d) fail(400, 'Lintang dan bujur harus diisi bersamaan');
+  if (d.map_rotation != null) d.map_rotation = ((Number(d.map_rotation) % 360) + 360) % 360;
+  for (const k of ['wall_color', 'roof_color']) if (d[k] != null && !G.HEX.test(d[k])) fail(400, 'Warna harus berformat #RRGGBB');
+  if (d.wall_color === null) d.wall_color = G.DEF_WALL;
+  if ('map_footprint' in d) {
+    const fp = d.map_footprint;
+    if (fp !== null) {
+      if (!Array.isArray(fp) || fp.length < 3 || fp.length > 200 || fp.some(p => !Array.isArray(p) || p.length !== 2 || !p.every(n => Number.isFinite(n) && Math.abs(n) < 2000))) fail(400, 'Tapak gedung tidak valid (minimal 3 titik, dalam meter)');
+      if (G.area(fp) < 4) fail(400, 'Tapak gedung terlalu kecil');
+      d.map_footprint = JSON.stringify(fp);
+    }
+  }
+  if (!Object.keys(d).length) fail(400, 'Tidak ada data');
+  const { sql, values } = setClause({ ...d, updated_at: new Date() }, 2);
+  await db.one(`UPDATE buildings SET ${sql} WHERE id=$1 RETURNING id`, [req.params.id, ...values]);
+  await audit(null, req.user, 'map', 'buildings', Number(req.params.id));
+  res.json((await mapBuildings(req.params.id))[0]);
+}));
+// Atur ulang tapak dari denah lantai (bukan tapak manual)
+r.post('/buildings/:id/map/reset-footprint', roles('superadmin'), ah(async (req, res) => {
+  await db.query('UPDATE buildings SET map_footprint=NULL, updated_at=now() WHERE id=$1', [req.params.id]);
+  res.json((await mapBuildings(req.params.id))[0]);
+}));
+
 // ---------------- Lantai & denah ----------------
 r.post('/buildings/:id/floors', roles('superadmin'), ah(async (req, res) => {
-  const d = pick(req.body, ['level', 'name', 'width', 'height', 'grid']);
-  res.status(201).json(await db.one(`INSERT INTO floors (building_id,level,name,width,height,grid) VALUES ($1,$2,$3,COALESCE($4,60),COALESCE($5,30),COALESCE($6,0.5)) RETURNING *`,
-    [req.params.id, d.level, d.name || `Lantai ${d.level}`, d.width, d.height, d.grid]));
+  const d = pick(req.body, ['level', 'name', 'width', 'height', 'grid', 'floor_height', 'wall_color']);
+  checkFloorMap(d);
+  res.status(201).json(await db.one(`INSERT INTO floors (building_id,level,name,width,height,grid,floor_height,wall_color) VALUES ($1,$2,$3,COALESCE($4,60),COALESCE($5,30),COALESCE($6,0.5),COALESCE($7,4),$8) RETURNING *`,
+    [req.params.id, d.level, d.name || `Lantai ${d.level}`, d.width, d.height, d.grid, d.floor_height, d.wall_color]));
 }));
 r.get('/floors/:id', ah(async (req, res) => {
   const f = await db.one(`SELECT f.*, b.name building_name, b.code building_code FROM floors f JOIN buildings b ON b.id=f.building_id WHERE f.id=$1`, [req.params.id]);
@@ -67,7 +118,10 @@ r.get('/floors/:id', ah(async (req, res) => {
   res.json(f);
 }));
 r.put('/floors/:id', roles('superadmin'), ah(async (req, res) => {
-  const { sql, values } = setClause(pick(req.body, ['level', 'name', 'width', 'height', 'grid', 'background_file_id', 'background_opacity']), 2);
+  const d = pick(req.body, ['level', 'name', 'width', 'height', 'grid', 'background_file_id', 'background_opacity', 'floor_height', 'wall_color']);
+  if ('floor_height' in d && d.floor_height === null) d.floor_height = 4;
+  checkFloorMap(d);
+  const { sql, values } = setClause(d, 2);
   res.json(await db.one(`UPDATE floors SET ${sql} WHERE id=$1 RETURNING *`, [req.params.id, ...values]));
 }));
 r.delete('/floors/:id', roles('superadmin'), ah(async (req, res) => {

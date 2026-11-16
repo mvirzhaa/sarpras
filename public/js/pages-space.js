@@ -38,6 +38,12 @@ route(/^#\/dashboard$/, async (view, _, q) => {
 });
 
 // ---------------- Gedung ----------------
+const FLOOR_MAP_FIELDS = [
+  { name: 'floor_height', label: 'Tinggi lantai (m)', type: 'number', min: 2, step: '0.1', default: 4, help: 'Bawaan 4 m; dipakai untuk tampilan 3D Peta kampus' },
+  { name: 'wall_custom', label: 'Warna dinding khusus lantai ini (bila tidak, ikut warna gedung)', type: 'checkbox', full: true },
+  { name: 'wall_color', label: 'Warna dinding lantai', type: 'color', default: '#C9B79C' }];
+const floorBody = (v, edit) => { const { wall_custom, ...r } = v; r.wall_color = wall_custom ? v.wall_color : null; if (r.floor_height == null) r.floor_height = 4; return r; };
+
 const BUILDING_FIELDS = [
   { name: 'code', label: 'Kode gedung', required: true, placeholder: 'mis. GKB-A' }, { name: 'name', label: 'Nama gedung', required: true },
   { name: 'address', label: 'Alamat', full: true }, { name: 'floors_count', label: 'Jumlah lantai', type: 'number', min: 1, help: 'Lantai dibuat otomatis' },
@@ -47,6 +53,7 @@ const BUILDING_FIELDS = [
   { name: 'condition', label: 'Kondisi', type: 'select', options: [['baik', 'Baik'], ['rusak_ringan', 'Rusak ringan'], ['rusak_sedang', 'Rusak sedang'], ['rusak_berat', 'Rusak berat']].map(([v, l]) => ({ value: v, label: l })) },
   { name: 'certificate_no', label: 'No. sertifikat tanah' }, { name: 'permit_no', label: 'No. IMB/PBG' }, { name: 'slf_no', label: 'No. SLF' },
   { name: 'acquisition_value', label: 'Nilai perolehan (Rp)', type: 'money' }, { name: 'latitude', label: 'Lintang', type: 'number', step: 'any' }, { name: 'longitude', label: 'Bujur', type: 'number', step: 'any' },
+  { name: 'wall_color', label: 'Warna dinding gedung', type: 'color', default: '#C9B79C', help: 'Dinding otomatis melapisi seluruh lantai di Peta kampus' },
   { name: 'description', label: 'Keterangan', type: 'textarea' },
 ];
 route(/^#\/gedung$/, async view => {
@@ -92,7 +99,8 @@ route(/^#\/gedung\/(\d+)$/, async (view, [id]) => {
       <div class="stat"><b>${fmt.num(b.stats.assets)}</b><span>Aset aktif</span></div><div class="stat"><b style="font-size:19px">${fmt.rp(b.stats.value)}</b><span>Nilai aset di gedung</span></div></div>
     <div class="grid2">
       <div class="panel"><div class="panel-head"><h3>Lantai & denah</h3><div class="actions">${sa ? `<button class="btn sm" id="addFloor">${I('plus')} Lantai</button>` : ''}</div></div>
-        ${UI.table({ rows: b.floors, empty: 'Belum ada lantai.', columns: [{ label: 'Lantai', render: f => `<b>${esc(f.name || 'Lantai ' + f.level)}</b>` }, { label: 'Ukuran', render: f => `${fmt.num(f.width)} × ${fmt.num(f.height)} m` },
+        ${UI.table({ rows: b.floors, empty: 'Belum ada lantai.', rowAttr: f => (sa ? `class="click" data-floor-row="${f.id}"` : ''), columns: [{ label: 'Lantai', render: f => `<b>${esc(f.name || 'Lantai ' + f.level)}</b>` }, { label: 'Ukuran', render: f => `${fmt.num(f.width)} × ${fmt.num(f.height)} m` },
+          { label: 'Tinggi', num: true, render: f => fmt.num(f.floor_height || 4) + ' m' }, { label: 'Dinding', render: f => `<i class="dot" style="background:${esc(f.wall_color || b.wall_color || '#C9B79C')}"></i>${f.wall_color ? '' : '<span class="muted">ikut gedung</span>'}` },
           { label: 'Ruang', num: true, render: f => f.room_total }, { label: 'Luas', num: true, render: f => fmt.num(f.area_total) + ' m²' },
           { label: '', render: f => `<div class="btn-row" style="justify-content:flex-end"><a class="btn sm ${sa ? 'primary' : ''}" href="#/denah/${f.id}" target="_blank" rel="noopener" title="Buka di tab baru">${sa ? 'Gambar denah' : 'Lihat denah'}</a><a class="btn sm" href="#/peta?f=${f.id}">Keterisian</a>${sa ? `<button class="btn sm ghost" data-delfloor="${f.id}" aria-label="Hapus lantai">${I('trash')}</button>` : ''}</div>` }] })}</div>
       <div class="panel"><div class="panel-head"><h3>Data gedung</h3></div><div class="panel-body"><dl class="kv">
@@ -105,12 +113,22 @@ route(/^#\/gedung\/(\d+)$/, async (view, [id]) => {
     </div>`;
   filesPanel($('#docs'), 'building', b.id, sa);
   if (!sa) return;
+  const FLOOR_FIELDS = [{ name: 'level', label: 'Nomor lantai', type: 'number', required: true, help: 'Basement: 0 atau negatif' }, { name: 'name', label: 'Nama', placeholder: 'mis. Lantai 3' },
+    { name: 'width', label: 'Lebar area gambar (m)', type: 'number', default: 60 }, { name: 'height', label: 'Panjang area gambar (m)', type: 'number', default: 30 }];
   $('#edit').onclick = () => UI.formModal({ title: 'Ubah data gedung', wide: true, fields: BUILDING_FIELDS.filter(f => f.name !== 'floors_count'), values: b, onSubmit: async v => { await API.put('/buildings/' + id, v); Ref.clear('buildings'); App.render(); } });
   $('#del').onclick = async () => { if (await UI.confirm(`Hapus gedung <b>${esc(b.name)}</b> beserta seluruh lantai dan ruangnya?`, { danger: true, ok: 'Hapus gedung' })) { await API.del('/buildings/' + id).catch(UI.err); Ref.clear('buildings', 'rooms'); location.hash = '#/gedung'; } };
-  $('#addFloor').onclick = () => UI.formModal({ title: 'Tambah lantai', fields: [{ name: 'level', label: 'Nomor lantai', type: 'number', required: true, help: 'Basement: 0 atau negatif' }, { name: 'name', label: 'Nama', placeholder: 'mis. Lantai 3' },
-    { name: 'width', label: 'Lebar area gambar (m)', type: 'number', default: 60 }, { name: 'height', label: 'Panjang area gambar (m)', type: 'number', default: 30 }],
-  values: { level: (Math.max(0, ...b.floors.map(f => f.level)) + 1) }, onSubmit: async v => { await API.post(`/buildings/${id}/floors`, v); App.render(); } });
-  view.addEventListener('click', async e => { const d = e.target.closest('[data-delfloor]'); if (d && await UI.confirm('Hapus lantai beserta semua ruangnya?', { danger: true, ok: 'Hapus' })) { await API.del('/floors/' + d.dataset.delfloor).catch(UI.err); App.render(); } });
+  $('#addFloor').onclick = () => UI.formModal({ title: 'Tambah lantai', fields: [...FLOOR_FIELDS, ...FLOOR_MAP_FIELDS],
+    values: { level: (Math.max(0, ...b.floors.map(f => f.level)) + 1) }, onSubmit: async v => { await API.post(`/buildings/${id}/floors`, floorBody(v, false)); App.render(); } });
+  view.addEventListener('click', async e => {
+    const tr = e.target.closest('[data-floor-row]');
+    if (tr && !e.target.closest('button, a')) {
+      const fl = b.floors.find(x => x.id === Number(tr.dataset.floorRow));
+      if (fl) UI.formModal({ title: 'Ubah lantai', fields: [...FLOOR_FIELDS, ...FLOOR_MAP_FIELDS], values: { ...fl, wall_custom: !!fl.wall_color, wall_color: fl.wall_color || b.wall_color || '#C9B79C' }, onSubmit: async v => { await API.put('/floors/' + fl.id, floorBody(v, true)); App.render(); } });
+      return;
+    }
+    const d = e.target.closest('[data-delfloor]');
+    if (d && await UI.confirm('Hapus lantai beserta semua ruangnya?', { danger: true, ok: 'Hapus' })) { await API.del('/floors/' + d.dataset.delfloor).catch(UI.err); App.render(); }
+  });
 });
 
 // ---------------- Editor denah ----------------

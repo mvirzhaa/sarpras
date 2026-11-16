@@ -31,16 +31,16 @@ crudPage({ path: 'master/kategori', importKey: 'categories', title: 'Kategori ru
     { name: 'bookable', label: 'Dapat dipinjam / dijadwalkan kegiatan', type: 'checkbox', default: true }, { name: 'schedulable', label: 'Dipakai penjadwalan kuliah otomatis', type: 'checkbox' }, { name: 'description', label: 'Keterangan', type: 'textarea' }] });
 crudPage({ path: 'master/orang', importKey: 'people', title: 'Dosen & pegawai', lead: 'Dipakai sebagai dosen pengampu di penjadwalan dan pemegang aset.', endpoint: '/people', refKey: 'people', canWrite: () => App.canWrite(),
   filters: [{ name: 'q', label: 'Cari nama / NIP / NIDN', type: 'search' }, { name: 'kind', label: 'Semua jenis', options: [['dosen', 'Dosen'], ['tendik', 'Tenaga kependidikan'], ['lainnya', 'Lainnya']].map(([a, b]) => ({ value: a, label: b })) }],
-  columns: [{ label: 'Nama', render: p => `<b>${esc(p.name)}</b>` }, { label: 'NIP/NIDN', key: 'id_number' }, { label: 'Jenis', key: 'kind' }, { label: 'Jabatan', key: 'position' }, { label: 'Unit', key: 'unit_name' }, { label: 'Aktif', render: p => (p.active ? '✓' : '–') }],
+  columns: [{ label: 'Nama', render: p => `<b>${esc(p.name)}</b>` }, { label: 'NIP/NIDN', key: 'id_number' }, { label: 'Jenis', key: 'kind' }, { label: 'Jabatan', key: 'position' }, { label: 'Unit', render: p => esc(p.unit_name || '') + (p.sub_unit_name ? `<br><small>› ${esc(p.sub_unit_name)}</small>` : '') }, { label: 'Aktif', render: p => (p.active ? '✓' : '–') }],
   fields: async () => [{ name: 'name', label: 'Nama lengkap', required: true }, { name: 'id_number', label: 'NIP / NIDN / NIK' },
     { name: 'kind', label: 'Jenis', type: 'select', empty: false, options: [['dosen', 'Dosen'], ['tendik', 'Tenaga kependidikan'], ['lainnya', 'Lainnya']].map(([a, b]) => ({ value: a, label: b })) },
-    { name: 'unit_id', label: 'Unit', type: 'select', options: await Ref.opts('units', u => u.name) }, { name: 'position', label: 'Jabatan' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'phone', label: 'Telepon' }, { name: 'active', label: 'Aktif', type: 'checkbox', default: true }] });
+    { name: 'unit_id', label: 'Unit', type: 'select', options: await Ref.opts('units', u => u.name) }, { name: 'sub_unit_id', label: 'Sub unit / prodi', type: 'select', options: await Ref.opts('subunits', x => `${x.unit_code} › ${x.name}`) }, { name: 'position', label: 'Jabatan' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'phone', label: 'Telepon' }, { name: 'active', label: 'Aktif', type: 'checkbox', default: true }] });
 crudPage({ path: 'master/matkul', importKey: 'courses', title: 'Mata kuliah', lead: 'Tag dipakai pada kendala penjadwalan, mis. "matematika" agar diutamakan di jam awal.', endpoint: '/courses', canWrite: () => App.canWrite(),
   filters: [{ name: 'q', label: 'Cari kode / nama', type: 'search' }],
   columns: [{ label: 'Kode', render: c => `<b class="mono">${esc(c.code)}</b>` }, { label: 'Nama', key: 'name' }, { label: 'SKS', num: true, key: 'credits' }, { label: 'Semester', num: true, key: 'semester_level' },
-    { label: 'Tag', render: c => (c.tags || []).map(t => `<span class="badge">${esc(t)}</span>`).join(' ') }, { label: 'Ruang disukai', key: 'category_name' }, { label: 'Unit', key: 'unit_name' }],
+    { label: 'Tag', render: c => (c.tags || []).map(t => `<span class="badge">${esc(t)}</span>`).join(' ') }, { label: 'Ruang disukai', key: 'category_name' }, { label: 'Unit', render: c => esc(c.unit_name || '') + (c.sub_unit_name ? `<br><small>› ${esc(c.sub_unit_name)}</small>` : '') }],
   fields: async () => [{ name: 'code', label: 'Kode MK', required: true }, { name: 'name', label: 'Nama MK', required: true }, { name: 'credits', label: 'SKS', type: 'number', default: 2 }, { name: 'semester_level', label: 'Semester', type: 'number' },
-    { name: 'tags', label: 'Tag (pisahkan koma)', placeholder: 'matematika, praktikum' }, { name: 'unit_id', label: 'Unit/prodi', type: 'select', options: await Ref.opts('units', u => u.name) },
+    { name: 'tags', label: 'Tag (pisahkan koma)', placeholder: 'matematika, praktikum' }, { name: 'unit_id', label: 'Unit', type: 'select', options: await Ref.opts('units', u => u.name) }, { name: 'sub_unit_id', label: 'Sub unit / prodi', type: 'select', options: await Ref.opts('subunits', x => `${x.unit_code} › ${x.name}`) },
     { name: 'preferred_category_id', label: 'Kategori ruang yang disukai', type: 'select', options: await Ref.opts('categories', c => c.name) }] });
 crudPage({ path: 'master/periode', importKey: 'periods', title: 'Periode akademik', lead: 'Penjadwalan kuliah dan laporan semester mengacu ke periode ini.', endpoint: '/periods', refKey: 'periods',
   columns: [{ label: 'Periode', render: p => `<b>${esc(p.name)}</b> ${p.is_active ? '<span class="badge ok">aktif</span>' : ''}` }, { label: 'Mulai', render: p => fmt.date(p.start_date) }, { label: 'Selesai', render: p => fmt.date(p.end_date) }],
@@ -81,25 +81,25 @@ Pages.slotGenerator = (rows) => {
     Ref.clear('slots'); UI.toast('Sesi kuliah diperbarui'); App.render();
   } }] });
   const draw = () => {
+    $('#brks', m.el).innerHTML = st.breaks.map((b, i) => `<div class="btn-row" style="margin-bottom:6px">Setelah sesi <input type="number" min="1" data-b="${i}" data-bk="after" value="${b.after}" style="width:80px"> selama
+      <input type="number" min="1" data-b="${i}" data-bk="minutes" value="${b.minutes}" style="width:90px"> menit <button class="btn ghost sm" data-rmb="${i}" aria-label="Hapus istirahat">${I('trash')}</button></div>`).join('') || '<p class="muted">Tanpa istirahat.</p>';
+    preview();
+  };
+  const preview = () => {
     const { out, err } = calc();
-    const bx = $('#brks', m.el);
-    bx.innerHTML = st.breaks.length ? st.breaks.map((b, i) => `<div class="btn-row" style="margin-bottom:6px"><span style="width:130px">Setelah sesi</span>
-      <input type="number" min="1" max="${st.count - 1}" value="${b.after}" data-bi="${i}" data-bk="after" style="width:80px">
-      <span>selama</span><input type="number" min="5" max="180" step="5" value="${b.minutes}" data-bi="${i}" data-bk="minutes" style="width:90px"><span>menit</span>
-      <button class="btn sm ghost" data-delb="${i}" style="margin-left:auto">${I('trash')}</button></div>`).join('') : '<p class="muted">Tidak ada jeda istirahat.</p>';
-    const pv = $('#prev', m.el);
-    if (err) pv.innerHTML = `<div class="badge bad">${esc(err)}</div>`;
-    else pv.innerHTML = `<div class="fp-legend" style="margin-bottom:6px">${out.map(x => `<span style="display:inline-block;padding:3px 8px;background:var(--sunk);border-radius:var(--r-sm);margin:2px 4px 2px 0"><b>Sesi ${x.no}</b> ${hm(x.s)}–${hm(x.e)}${x.brk ? ` <i class="badge warn sm">+${x.brk}m</i>` : ''}</span>`).join('')}</div>`;
+    $('#prev', m.el).innerHTML = (err ? `<div class="form-error">${esc(err)}</div>` : '') + `<div class="table-wrap" data-tk-off style="max-height:300px;overflow-y:auto"><table class="t"><thead><tr><th class="num">Sesi</th><th>Mulai</th><th>Selesai</th><th></th></tr></thead><tbody>
+      ${out.map(x => `<tr><td class="num"><b>${x.no}</b></td><td>${hm(x.s)}</td><td>${hm(x.e)}</td><td>${x.brk ? `<span class="badge warn">istirahat ${x.brk} menit</span>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
   };
-  m.el.oninput = e => {
-    const k = e.target.dataset.k; if (k) { st[k] = e.target.value; draw(); return; }
-    const bi = e.target.dataset.bi, bk = e.target.dataset.bk;
-    if (bi !== undefined && bk) { st.breaks[Number(bi)][bk] = Number(e.target.value); draw(); }
-  };
-  m.el.onclick = e => {
-    if (e.target.closest('#addBrk')) { st.breaks.push({ after: Math.min(st.count - 1, 6), minutes: 30 }); draw(); return; }
-    const d = e.target.closest('[data-delb]'); if (d) { st.breaks.splice(Number(d.dataset.delb), 1); draw(); }
-  };
+  m.body.addEventListener('input', e => {
+    const t = e.target;
+    if (t.dataset.k) st[t.dataset.k] = t.type === 'number' ? Number(t.value) : t.value;
+    if (t.dataset.b !== undefined) st.breaks[Number(t.dataset.b)][t.dataset.bk] = Number(t.value);
+    preview();
+  });
+  m.body.addEventListener('click', e => {
+    if (e.target.closest('#addBrk')) { st.breaks.push({ after: Math.min(st.count - 1, (st.breaks.at(-1) || { after: 3 }).after + 3), minutes: 30 }); draw(); }
+    const r = e.target.closest('[data-rmb]'); if (r) { st.breaks.splice(Number(r.dataset.rmb), 1); draw(); }
+  });
   draw();
 };
 
@@ -108,19 +108,18 @@ route(/^#\/unit$/, async view => {
   const [units, blds] = await Promise.all([API.get('/units').then(r => r.rows), Ref.get('buildings', true)]);
   const sa = App.isSA();
   view.innerHTML = App.head('Unit pengelola', 'Setiap unit otomatis memiliki akun admin. Akun aktif setelah Super Admin mengisi password. Tugaskan gedung atau ruang tertentu ke unit; penugasan per ruang mengalahkan penugasan per gedung.',
-    sa ? Importer.buttons('units') + `<button class="btn primary" id="add">${I('plus')} Buat unit</button>` : '') +
+    sa ? `<button class="btn primary" id="add">${I('plus')} Buat unit</button>` : '') +
     `<div class="panel">${UI.table({ rows: units, empty: 'Belum ada unit.', columns: [{ label: 'Unit', render: u => `<b>${esc(u.name)}</b><br><small class="mono">${esc(u.code)}</small>` },
       { label: 'Gedung / ruang dikelola', render: u => `${esc(u.buildings || '–')}<br><small>${u.room_count} ruang efektif</small>` }, { label: 'Pimpinan', render: u => esc(u.head_name || '–') },
       { label: 'Akun admin', render: u => `<span class="mono">${esc(u.admin_username || '–')}</span><br>${u.admin_active ? '<span class="badge ok">Aktif</span>' : u.admin_ready ? '<span class="badge warn">Nonaktif</span>' : '<span class="badge warn">Belum diisi</span>'}` },
-      ...(sa ? [{ label: '', render: u => `<div class="btn-row" style="justify-content:flex-end">${u.admin_active ? `<button class="btn sm ghost" data-as="${u.id}" title="Masuk sebagai admin unit ini">Masuk sebagai</button>` : ''}<button class="btn sm" data-asg="${u.id}">Penugasan</button><button class="btn sm" data-adm="${u.id}">Akun admin</button><button class="btn sm ghost" data-ed="${u.id}">Ubah</button></div>` }] : [])] })}</div>`;
+      ...(sa ? [{ label: '', render: u => `<div class="btn-row" style="justify-content:flex-end"><button class="btn sm" data-asg="${u.id}">Penugasan</button><button class="btn sm" data-adm="${u.id}">Akun admin</button><button class="btn sm primary" data-as="${u.id}" ${u.admin_id ? '' : 'disabled'}>Masuk sebagai</button><button class="btn sm ghost" data-ed="${u.id}">Ubah</button></div>` }] : [])] })}</div>`;
   if (!sa) return;
   const F = [{ name: 'code', label: 'Kode unit', required: true, placeholder: 'mis. FT, FEB, BAAK', help: 'Username admin: admin.<kode>' }, { name: 'name', label: 'Nama unit', required: true }, { name: 'head_name', label: 'Nama pimpinan unit' }, { name: 'head_nip', label: 'NIP pimpinan' },
     { name: 'email', label: 'Email unit', type: 'email' }, { name: 'phone', label: 'Telepon' }, { name: 'description', label: 'Keterangan', type: 'textarea' }];
   const done = () => { Ref.clear('units', 'rooms', 'myrooms'); App.render(); };
-  Importer.bind(view, 'units', 'Unit pengelola', done);
   $('#add').onclick = () => UI.formModal({ title: 'Buat unit pengelola', fields: F, onSubmit: async v => { const u = await API.post('/units', v); UI.toast(`Unit dibuat. Akun ${u.admin_username} menunggu password.`); done(); } });
   view.onclick = async e => {
-    const as = e.target.closest('[data-as]'); if (as) { const un = units.find(x => x.id === Number(as.dataset.as)); return App.impersonate(null, un.id); }
+    const as = e.target.closest('[data-as]'); if (as) { const un = units.find(x => x.id === Number(as.dataset.as)); return App.loginAs({ unit_id: un.id }, `admin ${un.name}`); }
     const ed = e.target.closest('[data-ed]'), adm = e.target.closest('[data-adm]'), asg = e.target.closest('[data-asg]');
     const u = units.find(x => x.id === Number((ed || adm || asg || {}).dataset?.[ed ? 'ed' : adm ? 'adm' : 'asg']));
     if (ed) { const m = UI.formModal({ title: 'Ubah unit', fields: F.filter(f => f.name !== 'code'), values: u, onSubmit: async v => { await API.put('/units/' + u.id, v); done(); } });
@@ -143,21 +142,21 @@ route(/^#\/unit$/, async view => {
 
 // ---------- Pengguna ----------
 route(/^#\/pengguna$/, async view => {
-  const rows = (await API.get('/users')).rows, units = await Ref.opts('units', u => u.name);
+  const rows = (await API.get('/users')).rows, units = await Ref.opts('units', u => u.name), subOpts = await Ref.opts('subunits', x => `${x.unit_code} › ${x.name}`);
   const ROLE = { superadmin: 'Super Admin', unit_admin: 'Admin unit', pimpinan: 'Pimpinan (lihat saja)' };
   view.innerHTML = App.head('Pengguna', 'Akun admin utama unit dibuat otomatis bersama unit. Tambahkan operator unit atau akun pimpinan di sini.', Importer.buttons('users') + `<button class="btn primary" id="add">${I('plus')} Tambah pengguna</button>`) +
     `<div class="panel">${UI.table({ rows, rowAttr: u => `class="click" data-u="${u.id}"`, columns: [{ label: 'Username', render: u => `<b class="mono">${esc(u.username)}</b>${u.is_unit_primary ? ' <span class="badge info">admin utama</span>' : ''}` },
-      { label: 'Nama', key: 'name' }, { label: 'Peran', render: u => ROLE[u.role] }, { label: 'Unit', key: 'unit_name' }, { label: 'Status', render: u => (u.active ? badge('aktif') : u.has_password ? badge('nonaktif') : '<span class="badge warn">Belum ada password</span>') },
+      { label: 'Nama', key: 'name' }, { label: 'Peran', render: u => ROLE[u.role] }, { label: 'Unit', render: u => esc(u.unit_name || '') + (u.sub_unit_name ? `<br><small>› ${esc(u.sub_unit_name)}</small>` : '') }, { label: 'Status', render: u => (u.active ? badge('aktif') : u.has_password ? badge('nonaktif') : '<span class="badge warn">Belum ada password</span>') },
       { label: 'Masuk terakhir', render: u => (u.last_login_at ? fmt.rel(u.last_login_at) : '–') }] })}</div>`;
   const F = edit => [{ name: 'username', label: 'Username', required: true }, { name: 'name', label: 'Nama' }, { name: 'email', label: 'Email', type: 'email' }, { name: 'phone', label: 'Telepon' },
-    { name: 'role', label: 'Peran', type: 'select', empty: false, options: Object.entries(ROLE).map(([a, b]) => ({ value: a, label: b })) }, { name: 'unit_id', label: 'Unit (wajib untuk admin unit)', type: 'select', options: units },
+    { name: 'role', label: 'Peran', type: 'select', empty: false, options: Object.entries(ROLE).map(([a, b]) => ({ value: a, label: b })) }, { name: 'unit_id', label: 'Unit (wajib untuk admin unit)', type: 'select', options: units }, { name: 'sub_unit_id', label: 'Sub unit / prodi (kosong = admin tingkat unit)', type: 'select', options: subOpts },
     { name: 'password', label: edit ? 'Reset password (kosongkan bila tidak)' : 'Password awal', type: 'password', required: !edit }, { name: 'active', label: 'Aktif', type: 'checkbox', default: true }];
   Importer.bind(view, 'users', 'Pengguna', () => App.render());
   $('#add').onclick = () => UI.formModal({ title: 'Tambah pengguna', fields: F(false), values: { role: 'unit_admin' }, onSubmit: async v => { await API.post('/users', v); App.render(); } });
   view.onclick = e => { const tr = e.target.closest('[data-u]'); if (!tr) return; const u = rows.find(x => x.id === Number(tr.dataset.u));
     const m = UI.formModal({ title: 'Ubah pengguna', fields: F(true), values: u, onSubmit: async v => { if (!v.password) delete v.password; await API.put('/users/' + u.id, v); App.render(); } });
-    if (u.role !== 'superadmin') { const as = document.createElement('button'); as.className = 'btn'; as.textContent = 'Masuk sebagai'; as.onclick = () => { m.close(); App.impersonate(u.id); }; $('.modal-foot', m.el).prepend(as); }
-    if (!u.is_unit_primary && u.id !== App.me.id) { const del = document.createElement('button'); del.className = 'btn danger'; del.textContent = 'Hapus'; del.style.marginRight = 'auto';
+    if (u.role !== 'superadmin') { const as = document.createElement('button'); as.className = 'btn'; as.textContent = 'Masuk sebagai'; as.onclick = () => { m.close(); App.loginAs({ user_id: u.id }, `${u.name || u.username} (${u.unit_name || u.role})`); }; $('.modal-foot', m.el).prepend(as); }
+    if (!u.is_unit_primary && !u.is_sub_primary && u.id !== App.me.id) { const del = document.createElement('button'); del.className = 'btn danger'; del.textContent = 'Hapus'; del.style.marginRight = 'auto';
       del.onclick = async () => { if (await UI.confirm('Hapus pengguna ini?', { danger: true })) { await API.del('/users/' + u.id); m.close(); App.render(); } }; $('.modal-foot', m.el).prepend(del); } };
 });
 

@@ -282,7 +282,7 @@ const Importer = {
 const Ref = {
   c: {},
   async get(k, force) {
-    const src = { units: '/units', categories: '/room-categories', buildings: '/buildings', periods: '/periods', slots: '/time-slots', people: '/people?limit=5000', rooms: '/rooms', myrooms: '/rooms?mine=1' }[k];
+    const src = { units: '/units', subunits: '/sub-units', categories: '/room-categories', buildings: '/buildings', periods: '/periods', slots: '/time-slots', people: '/people?limit=5000', rooms: '/rooms', myrooms: '/rooms?mine=1' }[k];
     if (force || !this.c[k]) this.c[k] = API.get(src).then(r => (r.rows ? r.rows : r));
     try { return await this.c[k]; } catch (e) { delete this.c[k]; throw e; }
   },
@@ -297,7 +297,7 @@ const Ref = {
 // ---------- Aplikasi & router ----------
 const NAV = [
   ['Ringkasan', [['#/dashboard', 'Dashboard', 'dash']]],
-  ['Ruang & jadwal', [['#/gedung', 'Gedung & denah', 'building'], ['#/peta', 'Peta keterisian', 'map'], ['#/tabulasi', 'Tabulasi harian', 'grid'],
+  ['Ruang & jadwal', [['#/gedung', 'Gedung & denah', 'building'], ['#/peta-kampus', 'Peta kampus 2D/3D', 'map'], ['#/peta', 'Peta keterisian', 'map'], ['#/tabulasi', 'Tabulasi harian', 'grid'],
     ['#/jadwal', 'Jadwal ruang', 'cal'], ['#/cari-ruang', 'Cari ruang kosong', 'search'], ['#/peminjaman', 'Peminjaman', 'swap', 'pending'],
     ['#/penjadwalan', 'Penjadwalan kuliah', 'cpu', null, ['superadmin', 'unit_admin']], ['#/kerusakan', 'Kerusakan ruang', 'wrench'], ['#/masukan', 'Masukan publik', 'chat']]],
   ['Aset tetap', [['#/aset', 'Daftar aset', 'box'], ['#/aset-pembelian', 'Pembelian / pengadaan', 'plus'], ['#/aset-pemakaian', 'Pemakaian (pinjam pakai)', 'person'],
@@ -306,7 +306,7 @@ const NAV = [
   ['Aset lancar (persediaan)', [['#/persediaan', 'Daftar barang', 'stack'], ['#/persediaan/pembelian', 'Pembelian', 'dl'], ['#/persediaan/pemakaian', 'Pemakaian', 'ext'],
     ['#/persediaan/opname', 'Stock opname', 'clip'], ['#/persediaan/laporan', 'Laporan persediaan', 'report'], ['#/persediaan/log', 'Log transaksi', 'log']]],
   ['Laporan & dokumen', [['#/laporan', 'Laporan umum', 'report'], ['#/ba', 'Berita acara', 'doc']]],
-  ['Pengaturan', [['#/unit', 'Unit pengelola', 'unit', null, ['superadmin', 'pimpinan']], ['#/pengguna', 'Pengguna', 'users', null, ['superadmin']],
+  ['Pengaturan', [['#/unit', 'Unit pengelola', 'unit', null, ['superadmin', 'pimpinan']], ['#/sub-unit', 'Sub unit / program studi', 'unit', null, ['superadmin', 'unit_admin']], ['#/pengguna', 'Pengguna', 'users', null, ['superadmin']],
     ['#/master/kategori', 'Kategori ruang', 'tag'], ['#/master/orang', 'Dosen & pegawai', 'person'], ['#/master/matkul', 'Mata kuliah', 'book'],
     ['#/master/periode', 'Periode akademik', 'cal'], ['#/master/sesi', 'Sesi kuliah', 'clock'], ['#/pengaturan', 'Organisasi', 'gear', null, ['superadmin']], ['#/audit', 'Log aktivitas', 'log', null, ['superadmin']]]],
 ];
@@ -327,22 +327,22 @@ const App = {
     if (App.me.must_change_password) setTimeout(() => Pages.password(true), 300);
     setInterval(App.refreshBadge, 60000);
   },
-  async impersonate(userId, unitId) {
-    const res = await API.post('/auth/impersonate', { user_id: userId, unit_id: unitId });
-    localStorage.setItem('sp_token_sa', localStorage.getItem('sp_token_sa') || API.token);
-    localStorage.setItem('sp_token', res.token); API.token = res.token;
-    sessionStorage.setItem('sp_msg_after', `Berhasil masuk sebagai ${res.user.name || res.user.username} (${res.user.unit_name}).`);
-    location.hash = '#/dashboard'; location.reload();
-  },
-  async stopImpersonate() {
-    const sa = localStorage.getItem('sp_token_sa');
+  async loginAs(target, label) {
+    if (!(await UI.confirm(`Masuk sebagai <b>${esc(label)}</b>? Anda akan melihat dan bekerja persis seperti admin unit tersebut. Semua aktivitas tercatat atas nama Anda sebagai Super Admin.`, { ok: 'Masuk sebagai unit' }))) return;
     try {
-      const res = await API.post('/auth/impersonate/stop', {});
-      localStorage.setItem('sp_token', res.token); API.token = res.token;
-    } catch {
-      if (sa) { localStorage.setItem('sp_token', sa); API.token = sa; }
-    }
+      const r = await API.post('/auth/impersonate', target);
+      localStorage.setItem('sp_token_sa', localStorage.getItem('sp_token_sa') || API.token);
+      localStorage.setItem('sp_token', r.token);
+      sessionStorage.setItem('sp_msg_after', `Berhasil masuk sebagai ${r.user.name || r.user.username} (${r.user.unit_name}).`);
+      location.hash = '#/dashboard'; location.reload();
+    } catch (e) { UI.err(e); }
+  },
+  impersonate(userId, unitId) { return this.loginAs({ user_id: userId, unit_id: unitId }, 'unit'); },
+  async stopImpersonate() {
+    let token = localStorage.getItem('sp_token_sa');
+    try { token = (await API.post('/auth/impersonate/stop')).token; } catch { /* pakai token super admin tersimpan */ }
     localStorage.removeItem('sp_token_sa');
+    if (token) localStorage.setItem('sp_token', token); else localStorage.removeItem('sp_token');
     sessionStorage.setItem('sp_msg_after', 'Kembali sebagai Super Admin.');
     location.hash = '#/unit'; location.reload();
   },
@@ -376,7 +376,7 @@ const App = {
       }).join('')}</nav></aside>
       <div class="main">${App.me.impersonated_by ? `<div class="imp-bar no-print">${I('person')}<span>Anda sedang <b>masuk sebagai ${esc(App.me.name || App.me.username)}</b> (${esc(App.me.unit_name || '')}). Aktivitas tercatat atas nama Super Admin ${esc(App.me.impersonator_name || '')}.</span><button class="btn sm" id="impStop">Kembali ke Super Admin</button></div>` : ''}<header class="topbar"><button class="btn ghost sm menu-btn" id="menuBtn" aria-label="Menu">${I('menu')}</button>
         <div class="who"><button class="btn ghost sm" id="bell" aria-label="Notifikasi">${I('bell')}<span class="badge warn" id="unread" hidden></span></button>
-        <span><b>${esc(App.me.name || App.me.username)}</b><br><small>${esc(App.me.unit_name || { superadmin: 'Super Admin', pimpinan: 'Pimpinan' }[role] || '')}</small></span>
+        <span><b>${esc(App.me.name || App.me.username)}</b><br><small>${esc((App.me.unit_name ? App.me.unit_name + (App.me.sub_unit_name ? ' › ' + App.me.sub_unit_name : '') : '') || { superadmin: 'Super Admin', pimpinan: 'Pimpinan' }[role] || '')}</small></span>
         <a href="#/akun" class="btn ghost sm">Akun</a><button class="btn sm" id="logout">${App.me.impersonated_by ? 'Akhiri' : 'Keluar'}</button></div></header>
       <main class="content" id="view"></main></div></div>`;
     $('#logout').onclick = () => (App.me.impersonated_by ? App.stopImpersonate() : App.logout());

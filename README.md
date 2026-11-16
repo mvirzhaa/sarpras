@@ -115,6 +115,41 @@ Pengelola efektif sebuah ruang ditentukan view `v_room_owner`: penugasan per rua
 - Laporan **harian, bulanan, semester**: utilisasi per ruang, kegiatan, rekap per unit penyelenggara (termasuk pemakaian ruang unit lain), beban mengajar dosen, peminjaman, masukan/keluhan, kerusakan, mutasi & perubahan aset, posisi & valuasi aset per ruang, perolehan baru, persediaan, berita acara. Cetak atau unduh Excel (satu sheet per bagian).
 - Notifikasi dalam aplikasi dan log aktivitas (audit).
 
+## Peta kampus 2D/3D
+
+Menu **Ruang & jadwal › Peta kampus 2D/3D** (`#/peta-kampus`) menempatkan gedung pada lokasi nyata.
+
+- Tampilan 2D (tampak atas) dan 3D (ekstrusi per lantai), latar Peta (OpenStreetMap) / Satelit (Esri) / Polos, pemotongan s.d. lantai tertentu.
+- Jumlah lantai mengikuti tabel `floors` (level ≥ 1). **Tinggi lantai bawaan 4 m**, diatur saat tambah/ubah lantai (`floors.floor_height`, 2–30 m).
+- **Dinding otomatis menyelimuti semua lantai**; warna dinding per gedung (`buildings.wall_color`), opsional per lantai (`floors.wall_color`), atap otomatis lebih gelap atau `roof_color`.
+- Tapak gedung = garis luar (convex hull) denah lantai terluas; bila belum ada denah dipakai perkiraan dari luas bangunan; dapat diatur manual (`map_footprint`, meter lokal [timur, utara]) dan diputar (`map_rotation`). Titik pusat = `latitude/longitude`.
+- API: `GET /api/map/buildings`, `GET|PUT /api/buildings/:id/map`, `POST /api/buildings/:id/map/reset-footprint` (tulis: Super Admin).
+- Pustaka MapLibre GL JS 4.7.1 dimuat dari cdn.jsdelivr.net, ubin dari OSM/Esri; CSP diatur di `src/server.js`. Ganti sumber ubin dengan variabel `TILE_HOSTS` di `.env` (daftar host dipisah koma) lalu sesuaikan `styleFor()` di `public/js/pages-map.js`.
+- Geometri: `public/js/mapgeo.js` (diuji `node test/mapgeo.test.js`); uji UI dengan pustaka peta tiruan: `node test/map-ui.test.js` (butuh Playwright).
+
+## Sub unit (program studi di bawah fakultas)
+
+- Tabel `sub_units` (kode, nama, jenis: prodi/jurusan/bagian/lainnya) milik satu unit. Setiap sub unit otomatis punya akun admin (`admin.<unit>.<kode>`, nonaktif sampai password diisi) di menu **Pengaturan › Sub unit / program studi**.
+- **Pengelola:** Super Admin dan admin unit (fakultas) mengelola semua sub unit unitnya; admin sub unit (`users.sub_unit_id` terisi) hanya mengelola data sub unitnya sendiri. Admin unit tanpa `sub_unit_id` = admin tingkat fakultas.
+- **Penjadwalan kuliah:** kelas (`course_classes.sub_unit_id`, kosong = tingkat unit) dan proses GA (`timetable_runs.sub_unit_id`, kosong = seluruh unit) dapat dibuat untuk seluruh fakultas atau per program studi. Memilih sub unit di bagian atas halaman Penjadwalan membatasi daftar kelas, impor, dan proses.
+- **Publikasi:** proses seluruh unit menggantikan semua jadwal kuliah unit pada periode itu; proses per prodi hanya menggantikan jadwal prodi itu (termasuk bagian prodi itu dari terbitan seluruh unit).
+- **Anti-bentrok lintas prodi:** ruang yang dipakai jadwal prodi lain, dan jam mengajar dosen di jadwal lain (mis. dosen yang mengajar di dua prodi), otomatis dihindari GA (`lecBlocked`).
+- Impor Excel: kolom **Program Studi (kode)** pada sheet Kelas; kosong = sub unit yang dipilih saat impor / tingkat unit. Admin prodi hanya boleh mengimpor prodinya.
+- Data master dosen (`people`) dan mata kuliah (`courses`) punya `sub_unit_id`; data baru dari admin prodi otomatis menjadi milik prodinya.
+- Akses ruang, peminjaman, dan aset tetap masih per unit: admin sub unit memakai ruang dan data unit induknya. Pembatasan per sub unit saat ini hanya untuk data akademik (kelas, dosen, MK, penjadwalan).
+- Demo: `npm run db:demo` membuat Fakultas Teknik dengan prodi TI & SI (`admin.ft` / `adminft123`, `admin.ft.ti` / `adminti123`, `admin.ft.si` / `adminsi123`).
+- Uji: `node test/subunit.test.js` (GA lintas prodi) dan `node test/subunit-ui.test.js` (Chromium, server tiruan).
+
+## Reset jadwal per semester
+
+- Tombol **Reset jadwal** di halaman Penjadwalan kuliah (`POST /api/tt/reset/preview` untuk menghitung dampak, `POST /api/tt/reset` untuk menghapus). Cakupan: `all` (seluruh universitas, hanya Super Admin), `unit` (satu fakultas), `sub` (satu program studi), selalu untuk satu periode.
+- Yang dihapus: pertemuan kuliah hasil penjadwalan (`events` bertanda `tt_run_id`) dan `timetable_runs` pada cakupan itu. Data kelas hanya ikut terhapus bila `include_classes` dicentang. Kegiatan/peminjaman manual tidak disentuh. Ditolak (409) bila ada proses yang masih berjalan; dicatat di audit log. Cakupan `all` meminta ketikan "RESET" di UI.
+- Super Admin tetap bisa menjalankan dan menerbitkan penjadwalan untuk unit/prodi mana pun.
+
+## Data awal Fakultas Agama Islam
+
+- `node db/seed-fai.js` membuat unit FAI, sub unit PAI/HKI/IAT/BKPI (beserta akun admin `admin.fai[.kode]`, kata sandi awal `admin<kode>123`, wajib diganti) dan periode 2026/2027 Genap. Tambahkan `--impor` (atau `npm run db:fai`) untuk sekaligus mengimpor `db/data/Impor_Kelas_FAI_Genap_2026-2027.xlsx` (208 kelas tanpa jadwal; mata kuliah berkode UIK dikecualikan; lihat sheet Catatan).
+
 ## Tabel: pencarian, filter, urut, paginasi
 
 Seluruh tabel (modul `public/js/tablekit.js`) otomatis memiliki kotak pencarian, filter kolom otomatis untuk kolom kategorikal, pengurutan A–Z/Z–A per kolom (angka, rupiah, tanggal Indonesia, dan teks natural dikenali otomatis; sel kosong selalu di bawah), serta paginasi 10/20/50/100 yang pilihannya disimpan. Cetak mencakup seluruh baris hasil saring. Untuk daftar besar (aset, log transaksi, log aktivitas) pengurutan dan paginasi dilakukan di server dengan daftar putih kolom (`orderBy` di `src/util.js`). Tabel dengan isian dinamis dikecualikan dengan atribut `data-tk-off`. Uji: `node test/tablekit.test.js`.

@@ -130,7 +130,13 @@ function solve(P, onProgress = () => {}) {
     const ri = roomIdx.get(Number(b.room_id)), d = dayIdx.get(Number(b.day));
     if (ri !== undefined && d !== undefined && b.slot_index >= 0 && b.slot_index < S) blocked[ri * DS + d * S + b.slot_index] = 1;
   }
-  const clear = () => { occR.fill(0); occL.fill(0); occG.fill(0); };
+  // Dosen yang sudah mengajar di jadwal lain (prodi/unit lain) pada sel tertentu: dihitung 1 sejak awal sehingga sesi apa pun di sel itu = bentrok dosen
+  const lecBase = new Int16Array(L * DS);
+  for (const b of P.lecBlocked || []) {
+    const li = lecMap.get(Number(b.lecturer_id)), d = dayIdx.get(Number(b.day));
+    if (li !== undefined && d !== undefined && b.slot_index >= 0 && b.slot_index < S) lecBase[li * DS + d * S + b.slot_index] = 1;
+  }
+  const clear = () => { occR.fill(0); occL.set(lecBase); occG.fill(0); };
   const addGene = (gi, t, ri, sg) => {
     const g = genes[gi];
     for (let k = 0; k < g.dur; k++) {

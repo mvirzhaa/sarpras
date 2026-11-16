@@ -86,6 +86,40 @@ const STEPS = [
   )`,
   `ALTER TABLE consumable_tx ADD COLUMN IF NOT EXISTS doc_id int REFERENCES stock_docs(id) ON DELETE SET NULL`,
   `CREATE INDEX IF NOT EXISTS consumable_tx_date_idx ON consumable_tx(tx_date)`,
+
+  // PETA KAMPUS 2D/3D
+  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS map_rotation numeric(6,2) NOT NULL DEFAULT 0`,
+  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS map_footprint jsonb`,
+  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS wall_color varchar(9) NOT NULL DEFAULT '#C9B79C'`,
+  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS roof_color varchar(9)`,
+  `ALTER TABLE floors ADD COLUMN IF NOT EXISTS floor_height numeric(5,2) NOT NULL DEFAULT 4`,
+  `ALTER TABLE floors ADD COLUMN IF NOT EXISTS wall_color varchar(9)`,
+
+  // SUB UNIT (program studi di bawah fakultas)
+  `CREATE TABLE IF NOT EXISTS sub_units (
+    id          serial PRIMARY KEY,
+    unit_id     int NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+    code        varchar(20) NOT NULL,
+    name        varchar(150) NOT NULL,
+    kind        varchar(20) NOT NULL DEFAULT 'prodi' CHECK (kind IN ('prodi','jurusan','bagian','lainnya')),
+    description text,
+    head_name   varchar(150),
+    head_nip    varchar(40),
+    email       varchar(150),
+    phone       varchar(40),
+    active      boolean NOT NULL DEFAULT true,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (unit_id, code)
+  )`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE CASCADE`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_sub_primary boolean NOT NULL DEFAULT false`,
+  `ALTER TABLE people ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL`,
+  `ALTER TABLE courses ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL`,
+  `ALTER TABLE course_classes ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL`,
+  `ALTER TABLE timetable_runs ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE CASCADE`,
+  `ALTER TABLE events ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL`,
+  `CREATE INDEX IF NOT EXISTS cc_sub_idx ON course_classes(sub_unit_id)`,
+  `CREATE INDEX IF NOT EXISTS events_sub_idx ON events(sub_unit_id)`,
 ];
 module.exports = async function migrate() {
   for (const q of STEPS) await pool.query(q);

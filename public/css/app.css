@@ -350,3 +350,29 @@ tr[data-hp], tr[data-hf] { display: none; }
 
 /* atribut hidden harus selalu menang atas display bawaan komponen (.btn, .btn-row, dll.) */
 [hidden] { display: none !important; }
+
+/* ---------- Mode masuk sebagai ---------- */
+.imp-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--amber-soft); color: #5E3E05; border-bottom: 1px solid #E8CF9D; padding: 8px 28px; font-size: 14px; }
+.imp-bar svg { width: 18px; height: 18px; flex: none; } .imp-bar .btn { margin-left: auto; }
+
+/* ===== Peta kampus ===== */
+.mapx { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+.mapx-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+.mapx-bar .inl { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-sm); overflow: hidden; }
+.seg button { font: 600 13px var(--font); background: #fff; border: 0; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button.on { background: var(--plan); color: #fff; }
+.cmap { height: min(72vh, 680px); min-height: 420px; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: #E6ECE7; }
+.mapx-note { margin-top: 6px; font-size: 13px; }
+.mapx-list { max-height: 260px; overflow: auto; }
+.mapx-item { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: #fff; padding: 9px 12px; cursor: pointer; font: 14px var(--font); }
+.mapx-item small { display: block; color: var(--muted, #667); font-size: 12px; }
+.mapx-item.on { background: #E8F3EE; }
+.sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.25); flex: none; }
+.mapx-floors { display: grid; gap: 4px; margin-top: 10px; font-size: 13px; }
+.mapx-floors div { display: flex; gap: 8px; align-items: center; } .mapx-floors .muted { margin-left: auto; }
+.map-label { background: #fff; border: 1px solid #333; border-radius: 4px; padding: 1px 6px; font: 700 12px var(--font); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.map-label.on { background: var(--plan); color: #fff; border-color: var(--plan); }
+input[type=color] { width: 100%; height: 36px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
+@media (max-width: 900px) { .mapx { grid-template-columns: 1fr; } .cmap { height: 60vh; } }

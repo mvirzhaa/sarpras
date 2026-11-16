@@ -12,41 +12,44 @@ const CON_TYPES = {
 const SCOPES = [['all', 'Semua kelas'], ['tags', 'MK dengan tag'], ['courses', 'Mata kuliah'], ['lecturer', 'Dosen'], ['groups', 'Rombel']];
 
 route(/^#\/penjadwalan$/, async (view, _, q) => {
-  // Periode & unit selalu diambil ulang agar data yang baru ditambahkan langsung terbaca
-  const [periods, units, slots, cats] = await Promise.all([Ref.get('periods', true), Ref.get('units', true), Ref.get('slots'), Ref.get('categories')]);
+  const [periods, units, slots, cats] = await Promise.all([Ref.get('periods'), Ref.get('units'), Ref.get('slots'), Ref.get('categories')]);
   const period = Number(q.period) || (periods.find(p => p.is_active) || periods[0] || {}).id;
   const unit = App.isSA() ? Number(q.unit) || (units[0] || {}).id : App.me.unit_id;
   const tab = q.tab || 'kelas';
-  if (!period || !unit) {
-    const need = [];
-    if (!period) need.push(`<li>Periode akademik belum ada. ${App.isSA() ? '<a href="#/master/periode">Tambah periode akademik</a>' : 'Hubungi Super Admin.'}</li>`);
-    if (!unit) need.push(App.isSA()
-      ? '<li>Unit pengelola belum ada. <a href="#/unit">Tambah unit</a>, lalu tugaskan gedung/ruang ke unit tersebut.</li>'
-      : '<li>Akun Anda belum terhubung ke unit mana pun. Hubungi Super Admin.</li>');
-    view.innerHTML = App.head('Penjadwalan kuliah') + `<div class="empty">Sebelum menyusun jadwal, lengkapi dulu:<ul style="text-align:left;display:inline-block;margin-top:8px">${need.join('')}</ul></div>`;
-    return;
-  }
+  // Sub unit (mis. program studi): kosong = seluruh unit (fakultas); admin prodi dikunci ke sub unitnya
+  const subs = unit ? await API.get('/sub-units', { unit_id: unit, active: 1 }).then(r => r.rows).catch(() => []) : [];
+  const mySub = App.me.sub_unit_id || null;
+  const sub = mySub ? String(mySub) : (subs.some(s => String(s.id) === String(q.sub)) ? String(q.sub) : '');
+  if (!period || !unit) { view.innerHTML = App.head('Penjadwalan kuliah') + '<div class="empty">Buat periode akademik dan unit terlebih dahulu.</div>'; return; }
   view.innerHTML = App.head('Penjadwalan kuliah otomatis', 'Masukkan kelas, pilih ruang dan kendala, lalu biarkan algoritma genetika memetik menyusun jadwal tanpa bentrok untuk satu semester.') + `
     <div class="filters"><select id="per">${UI.options(periods.map(p => ({ value: p.id, label: p.name + (p.is_active ? ' (aktif)' : '') })), period)}</select>
-      ${App.isSA() ? `<select id="un">${UI.options(units.map(u => ({ value: u.id, label: u.name })), unit)}</select>` : `<b>${esc(App.me.unit_name)}</b>`}</div>
+      ${App.isSA() ? `<select id="un">${UI.options(units.map(u => ({ value: u.id, label: u.name })), unit)}</select>` : `<b>${esc(App.me.unit_name)}</b>`}
+      ${mySub ? `<b>› ${esc(App.me.sub_unit_name)}</b>` : subs.length ? `<select id="su" aria-label="Sub unit / program studi"><option value="">Seluruh unit (semua program studi)</option>${UI.options(subs.map(s => ({ value: s.id, label: s.name })), sub)}</select>` : ''}</div>
     <div class="tabs" id="tabs"></div><div id="body"></div>`;
+  if (App.canWrite()) {
+    const rb = document.createElement('button'); rb.className = 'btn danger sm'; rb.id = 'resetTt'; rb.style.marginLeft = 'auto'; rb.textContent = 'Reset jadwal…';
+    rb.title = 'Hapus jadwal kuliah satu semester untuk universitas, fakultas, atau program studi'; $('.filters').appendChild(rb);
+    rb.onclick = () => ttReset({ period, periods, unit, units, sub, subs });
+  }
   $('#per').onchange = e => setQ('#/penjadwalan', { ...q, period: e.target.value });
-  if ($('#un')) $('#un').onchange = e => setQ('#/penjadwalan', { ...q, unit: e.target.value });
+  if ($('#un')) $('#un').onchange = e => setQ('#/penjadwalan', { ...q, unit: e.target.value, sub: '' });
+  if ($('#su')) $('#su').onchange = e => setQ('#/penjadwalan', { ...q, sub: e.target.value });
   UI.tabs($('#tabs'), [['kelas', '1. Kelas & dosen'], ['kendala', '2. Ruang & kendala'], ['hasil', '3. Proses & hasil']], tab, t => setQ('#/penjadwalan', { ...q, tab: t }));
-  const body = $('#body'), ctx = { period, unit, slots, cats, periods };
+  const body = $('#body'), ctx = { period, unit, sub, subs, slots, cats, periods };
   if (tab === 'kelas') await ttClasses(body, ctx);
   if (tab === 'kendala') await ttConstraints(body, ctx);
   if (tab === 'hasil') await ttResults(body, ctx, q);
 });
 
-async function ttClasses(body, { period, unit, cats, periods }) {
-  const [rows, courses, people] = await Promise.all([API.get('/tt/classes', { period_id: period, unit_id: unit }), API.get('/courses', { limit: 5000 }).then(r => r.rows), Ref.get('people')]);
+async function ttClasses(body, { period, unit, sub, subs, cats, periods }) {
+  const [rows, courses, people] = await Promise.all([API.get('/tt/classes', { period_id: period, unit_id: unit, sub_unit_id: sub }), API.get('/courses', { limit: 5000 }).then(r => r.rows), Ref.get('people')]);
   const totalSess = rows.reduce((s, r) => s + r.sessions_per_week * r.duration_slots, 0);
-  body.innerHTML = `<div class="page-head" style="margin-bottom:12px"><p class="lead">${rows.length} kelas · ${totalSess} sesi-jam per pekan</p><div class="actions">
+  body.innerHTML = `<div class="page-head" style="margin-bottom:12px"><p class="lead">${rows.length} kelas · ${totalSess} sesi-jam per pekan · ${sub ? 'program studi ' + esc((subs.find(s => String(s.id) === sub) || {}).name || '') : 'seluruh unit'}</p><div class="actions">
       <button class="btn" id="copy">Salin dari semester lain</button><button class="btn" id="imp">Impor CSV</button>
       <button class="btn" id="tpl">${I('dl')} Template Excel</button><button class="btn" id="impx">${I('dl')} Impor Excel</button><button class="btn primary" id="add">${I('plus')} Tambah kelas</button></div></div>
     <div class="panel">${UI.table({ rows, empty: 'Belum ada kelas. Tambah manual, impor CSV, atau salin dari semester sebelumnya.', rowAttr: r => `class="click" data-c="${r.id}"`, columns: [
       { label: 'Mata kuliah', render: r => `<b class="mono">${esc(r.course_code)}</b> ${esc(r.course_name)}${(r.tags || []).length ? `<br>${r.tags.map(t => `<span class="badge">${esc(t)}</span>`).join(' ')}` : ''}` },
+      ...(sub ? [] : [{ label: 'Sub unit', render: r => r.sub_unit_name ? esc(r.sub_unit_name) : '<span class="muted">Tingkat unit</span>' }]),
       { label: 'Kelas', render: r => esc(r.class_name) }, { label: 'Rombel', render: r => esc(r.student_group || '–') }, { label: 'Dosen', render: r => esc(r.lecturer_name || '–') },
       { label: 'Mhs', num: true, render: r => r.student_count }, { label: 'Durasi', render: r => `${r.duration_slots} sesi × ${r.sessions_per_week}/pekan` },
       { label: 'Ruang', render: r => esc(r.fixed_room_code || r.category_name || 'Bebas') }] })}</div>`;
@@ -54,11 +57,12 @@ async function ttClasses(body, { period, unit, cats, periods }) {
   const fields = async () => [{ name: 'course_id', label: 'Mata kuliah', type: 'select', required: true, options: courseOpts, full: true, help: 'Belum ada? Tambahkan di menu Mata kuliah atau lewat impor CSV.' },
     { name: 'class_name', label: 'Nama kelas', required: true, default: 'A' }, { name: 'student_group', label: 'Rombel (tidak boleh bentrok)', placeholder: 'mis. TI-3A' },
     { name: 'lecturer_id', label: 'Dosen', type: 'select', options: people.filter(p => p.kind === 'dosen').map(p => ({ value: p.id, label: p.name })) },
+    ...(App.me.sub_unit_id || !subs.length ? [] : [{ name: 'sub_unit_id', label: 'Program studi / sub unit', type: 'select', empty: 'Tingkat unit (seluruh fakultas)', options: subs.map(s => ({ value: s.id, label: s.name })), help: 'Kosongkan bila kelas dikelola tingkat unit' }]),
     { name: 'student_count', label: 'Jumlah mahasiswa', type: 'number', default: 30, min: 1 }, { name: 'duration_slots', label: 'Durasi (sesi berurutan)', type: 'number', default: 2, min: 1, help: 'Umumnya = sks' },
     { name: 'sessions_per_week', label: 'Pertemuan per pekan', type: 'number', default: 1, min: 1 },
     { name: 'required_category_id', label: 'Wajib kategori ruang', type: 'select', empty: 'Ikuti cakupan ruang', options: cats.map(c => ({ value: c.id, label: c.name })) },
     { name: 'fixed_room_id', label: 'Kunci di ruang tertentu', type: 'select', empty: 'Tidak dikunci', options: await Ref.roomOpts(!App.isSA()) }, { name: 'note', label: 'Catatan', type: 'textarea' }];
-  $('#add').onclick = async () => UI.formModal({ title: 'Tambah kelas', wide: true, fields: await fields(), onSubmit: async v => { await API.post('/tt/classes', { ...v, period_id: period, unit_id: unit }); App.render(); } });
+  $('#add').onclick = async () => UI.formModal({ title: 'Tambah kelas', wide: true, fields: await fields(), values: { sub_unit_id: sub || '' }, onSubmit: async v => { await API.post('/tt/classes', { ...v, period_id: period, unit_id: unit }); App.render(); } });
   body.onclick = async e => {
     const tr = e.target.closest('[data-c]'); if (!tr) return;
     const c = rows.find(x => x.id === Number(tr.dataset.c));
@@ -68,9 +72,9 @@ async function ttClasses(body, { period, unit, cats, periods }) {
     $('.modal-foot', m.el).prepend(del);
   };
   $('#copy').onclick = () => UI.formModal({ title: 'Salin kelas dari semester lain', fields: [{ name: 'from_period_id', label: 'Semester sumber', type: 'select', required: true, options: periods.filter(p => p.id !== period).map(p => ({ value: p.id, label: p.name })) }],
-    onSubmit: async v => { const r = await API.post('/tt/classes/copy', { ...v, to_period_id: period, unit_id: unit }); UI.toast(`${r.copied} kelas disalin`); App.render(); } });
+    onSubmit: async v => { const r = await API.post('/tt/classes/copy', { ...v, to_period_id: period, unit_id: unit, sub_unit_id: sub }); UI.toast(`${r.copied} kelas disalin`); App.render(); } });
   $('#tpl').onclick = () => {
-    const m = UI.modal({ title: 'Unduh template Excel penjadwalan', wide: true, body: `<p>Template berisi sheet <b>Dosen</b>, <b>Mata Kuliah</b>, <b>Kelas</b>, <b>Kendala</b>, dan <b>Petunjuk</b>, lengkap dengan daftar pilihan kategori ruang, kode ruang unit, jenis kendala, dan hari.</p>
+    const m = UI.modal({ title: 'Unduh template Excel', body: `<p>Template berisi sheet <b>Dosen</b>, <b>Mata Kuliah</b>, <b>Kelas</b>, <b>Kendala</b>, dan <b>Petunjuk</b>, lengkap dengan daftar pilihan kategori ruang, kode ruang unit, jenis kendala, dan hari.</p>
       <div class="btn-row" style="margin-top:14px"><a class="btn primary" href="${API.url('/tt/excel-template', { unit_id: unit })}">${I('dl')} Template kosong</a>
       <a class="btn" href="${API.url('/tt/excel-template', { unit_id: unit, sample: 1 })}">${I('dl')} Template berisi contoh data</a></div>
       <p class="muted" style="font-size:13px;margin-top:12px">Contoh data: Prodi Teknik Informatika semester ganjil — 18 dosen, 26 mata kuliah, 51 kelas (termasuk kelas karyawan malam), dan 11 kendala. Nama dan NIDN fiktif.</p>`, actions: [{ label: 'Tutup' }] });
@@ -85,14 +89,14 @@ async function ttClasses(body, { period, unit, cats, periods }) {
       const r = await send(false);
       const repl = $('#xrep', m.el);
       if (r.constraints.length) {
-        const key = `tt_cfg_${unit}`, cfg = JSON.parse(localStorage.getItem(key) || 'null') || { room_scope: { mode: 'owned' }, constraints: [], params: { population: 60, generations: 1000, time_limit_ms: 90000, days: [1, 2, 3, 4, 5, 6] } };
+        const key = `tt_cfg_${unit}_${sub || 'all'}`, cfg = JSON.parse(localStorage.getItem(key) || 'null') || { room_scope: { mode: 'owned' }, constraints: [], params: { population: 60, generations: 1000, time_limit_ms: 90000, days: [1, 2, 3, 4, 5, 6] } };
         cfg.constraints = repl && repl.checked ? r.constraints : cfg.constraints.concat(r.constraints);
         localStorage.setItem(key, JSON.stringify(cfg));
       }
       UI.toast(`Impor selesai: ${r.kelas.created} kelas baru, ${r.kelas.updated} diperbarui${r.constraints.length ? `, ${r.constraints.length} kendala` : ''}`);
       App.render();
     } }] });
-    const send = async dry => { const fd = new FormData(); fd.append('file', file); fd.append('period_id', period); fd.append('unit_id', unit); fd.append('dry_run', dry ? '1' : '0'); return API.req('POST', '/tt/import-excel', fd); };
+    const send = async dry => { const fd = new FormData(); fd.append('file', file); fd.append('period_id', period); fd.append('unit_id', unit); fd.append('sub_unit_id', sub); fd.append('dry_run', dry ? '1' : '0'); return API.req('POST', '/tt/import-excel', fd); };
     $('#xf', m.el).onchange = async e => {
       file = e.target.files[0]; if (!file) return;
       const box = $('#xr', m.el); box.innerHTML = '<div class="empty">Memeriksa berkas…</div>';
@@ -114,7 +118,7 @@ async function ttClasses(body, { period, unit, cats, periods }) {
       <label class="field"><span>Berkas CSV</span><input type="file" accept=".csv,text/csv" id="csvF"></label><label class="field" style="margin-top:10px"><span>atau tempel isi CSV</span><textarea id="csvT" style="min-height:140px;font-family:var(--mono);font-size:12px"></textarea></label><div id="csvR"></div>`,
       actions: [{ label: 'Batal' }, { label: 'Impor', kind: 'primary', onClick: async () => {
         const rowsCsv = parseCSV($('#csvT', m.el).value); if (!rowsCsv.length) throw new Error('CSV kosong');
-        const r = await API.post('/tt/classes/import', { period_id: period, unit_id: unit, rows: rowsCsv });
+        const r = await API.post('/tt/classes/import', { period_id: period, unit_id: unit, sub_unit_id: sub, rows: rowsCsv });
         UI.toast(`${r.imported} kelas diimpor`); if (r.errors.length) { $('#csvR', m.el).innerHTML = `<div class="form-error">${r.errors.map(esc).join('<br>')}</div>`; return false; } App.render(); } }] });
     $('#csvF', m.el).onchange = async e => { $('#csvT', m.el).value = await e.target.files[0].text(); };
   };
@@ -128,9 +132,9 @@ function parseCSV(text) {
   return lines.slice(1).map(l => Object.fromEntries(split(l).map((v, i) => [h[i], v])));
 }
 
-async function ttConstraints(body, { period, unit, slots, cats }) {
-  const [runs, people, courses, rooms] = await Promise.all([API.get('/tt/runs', { period_id: period, unit_id: unit }), Ref.get('people'), API.get('/courses', { limit: 5000 }).then(r => r.rows), API.get('/rooms', App.isSA() ? { unit_id: unit } : { mine: 1 }).then(r => r.rows)]);
-  const key = `tt_cfg_${unit}`;
+async function ttConstraints(body, { period, unit, sub, subs, slots, cats }) {
+  const [runs, people, courses, rooms] = await Promise.all([API.get('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub }), Ref.get('people'), API.get('/courses', { limit: 5000 }).then(r => r.rows), API.get('/rooms', App.isSA() ? { unit_id: unit } : { mine: 1 }).then(r => r.rows)]);
+  const key = `tt_cfg_${unit}_${sub || 'all'}`;
   const saved = JSON.parse(localStorage.getItem(key) || 'null');
   const last = runs[0];
   const cfg = saved || { room_scope: last ? last.room_scope : { mode: 'owned' }, constraints: last ? (await API.get('/tt/runs/' + last.id)).constraints : [CON_TYPES.block.make(), CON_TYPES.early.make(), CON_TYPES.spread.make()],
@@ -166,7 +170,7 @@ async function ttConstraints(body, { period, unit, slots, cats }) {
         <label class="check"><input type="radio" name="rsm" value="rooms" ${rs.mode === 'rooms' ? 'checked' : ''}> Pilih ruang satu per satu</label>
         ${rs.mode === 'rooms' ? `<div style="padding-left:24px;max-height:220px;overflow-y:auto">${rooms.map(r => `<label class="check" style="display:flex"><input type="checkbox" data-room="${r.id}" ${(rs.room_ids || []).map(Number).includes(r.id) ? 'checked' : ''}><span class="mono">${esc(r.code)}</span> ${esc(r.name)} <small>(${r.capacity})</small></label>`).join('') || '<span class="muted">Unit belum mengelola ruang.</span>'}</div>` : ''}
         ${App.isSA() ? `<label class="check"><input type="radio" name="rsm" value="campus" ${rs.mode === 'campus' ? 'checked' : ''}> Seluruh ruang kuliah kampus (lintas unit)</label>` : ''}
-        <p class="muted" style="font-size:13px">Jadwal berulang unit lain di ruang yang sama otomatis dihindari.</p></div></div>
+        <p class="muted" style="font-size:13px">Jadwal berulang unit/program studi lain di ruang yang sama, serta jam mengajar dosen di jadwal lain, otomatis dihindari.</p></div></div>
       <div class="panel"><div class="panel-head"><h3>Hari, sesi & parameter algoritma</h3></div><div class="panel-body stack">
         <div class="field"><span>Hari kuliah</span><div class="btn-row">${dayChecks(cfg.params.days || [1, 2, 3, 4, 5, 6], 'data-pday')}</div></div>
         <div class="field"><span>Sesi yang dipakai (kosong = semua)</span><div class="btn-row">${slotChecks(cfg.params.slot_nos || [], 'data-pslot')}</div>
@@ -203,17 +207,17 @@ async function ttConstraints(body, { period, unit, slots, cats }) {
   body.onclick = async e => {
     const rm = e.target.closest('[data-rm]'); if (rm) { cfg.constraints.splice(Number(rm.dataset.rm), 1); save(); return draw(); }
     if (e.target.closest('#run')) {
-      try { const r = await API.post('/tt/runs', { period_id: period, unit_id: unit, room_scope: cfg.room_scope, constraints: cfg.constraints, params: cfg.params }); setQ('#/penjadwalan', { period, unit, tab: 'hasil', run: r.id }); } catch (er) { UI.err(er); }
+      try { const r = await API.post('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub, room_scope: cfg.room_scope, constraints: cfg.constraints, params: cfg.params }); setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: r.id }); } catch (er) { UI.err(er); }
     }
   };
 }
 
-async function ttResults(body, { period, unit, slots }, q) {
-  const runs = await API.get('/tt/runs', { period_id: period, unit_id: unit });
+async function ttResults(body, { period, unit, sub, slots }, q) {
+  const runs = await API.get('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub });
   if (!runs.length) { body.innerHTML = '<div class="empty">Belum ada proses penjadwalan. Atur ruang & kendala, lalu jalankan.</div>'; return; }
   const runId = Number(q.run) || runs[0].id;
-  body.innerHTML = `<div class="filters"><select id="runSel" style="min-width:360px">${runs.map(r => `<option value="${r.id}" ${r.id === runId ? 'selected' : ''}>#${r.id} · ${fmt.dt(r.created_at)} · ${STATUS[r.status][0]}${r.hard_violations !== null ? ` · bentrok ${r.hard_violations}` : ''}</option>`).join('')}</select></div><div id="runBody"></div>`;
-  $('#runSel').onchange = e => setQ('#/penjadwalan', { period, unit, tab: 'hasil', run: e.target.value });
+  body.innerHTML = `<div class="filters"><select id="runSel" style="min-width:360px">${runs.map(r => `<option value="${r.id}" ${r.id === runId ? 'selected' : ''}>#${r.id} · ${esc(r.sub_unit_name || 'Seluruh unit')} · ${fmt.dt(r.created_at)} · ${STATUS[r.status][0]}${r.hard_violations !== null ? ` · bentrok ${r.hard_violations}` : ''}</option>`).join('')}</select></div><div id="runBody"></div>`;
+  $('#runSel').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: e.target.value });
   let timer;
   const show = async () => {
     const run = await API.get('/tt/runs/' + runId), rb = $('#runBody'); if (!rb) return clearInterval(timer);
@@ -245,20 +249,20 @@ async function ttResults(body, { period, unit, slots }, q) {
       <div class="table-wrap"><table class="tt-grid"><thead><tr><th>Sesi</th>${days.map(d => `<th>${ISO_DAY[d]}</th>`).join('')}</tr></thead><tbody>
         ${rs.map((s, si) => `<tr><th style="white-space:nowrap">${s.slot_no}<br><small>${s.start_time}</small></th>${days.map(d => `<td>${cell(d, si)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
       <p class="muted" style="font-size:13px;margin-top:8px">Klik kartu kelas untuk memindahkan secara manual sebelum dipublikasikan.</p>`;
-    $('#by').onchange = e => setQ('#/penjadwalan', { period, unit, tab: 'hasil', run: runId, by: e.target.value });
-    $('#key').onchange = e => setQ('#/penjadwalan', { period, unit, tab: 'hasil', run: runId, by: view, key: e.target.value });
+    $('#by').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: runId, by: e.target.value });
+    $('#key').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: runId, by: view, key: e.target.value });
     $('#csv').onclick = () => {
       const lines = [['hari', 'mulai', 'selesai', 'kode_mk', 'mata_kuliah', 'kelas', 'rombel', 'dosen', 'ruang', 'mahasiswa'].join(',')].concat(
         [...A].sort((a, b) => a.day - b.day || a.slot_index - b.slot_index).map(a => [ISO_DAY[a.day], a.start_time, a.end_time, a.course_code, `"${a.course_name}"`, a.class_name, a.group || '', `"${a.lecturer_name || ''}"`, a.room_code, a.size].join(',')));
       const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' }); const u = URL.createObjectURL(blob);
       const l = document.createElement('a'); l.href = u; l.download = `jadwal-run-${runId}.csv`; l.click(); URL.revokeObjectURL(u);
     };
-    $('#delRun').onclick = async () => { if (await UI.confirm('Hapus hasil ini? Jika sudah dipublikasikan, jadwal kuliah dari hasil ini ikut terhapus.', { danger: true, ok: 'Hapus' })) { await API.del('/tt/runs/' + runId); setQ('#/penjadwalan', { period, unit, tab: 'hasil' }); } };
+    $('#delRun').onclick = async () => { if (await UI.confirm('Hapus hasil ini? Jika sudah dipublikasikan, jadwal kuliah dari hasil ini ikut terhapus.', { danger: true, ok: 'Hapus' })) { await API.del('/tt/runs/' + runId); setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil' }); } };
     $('#pub').onclick = () => UI.formModal({ title: 'Publikasikan jadwal kuliah', submit: 'Publikasikan',
       fields: [{ name: 'start_date', label: 'Mulai tanggal', type: 'date', help: 'Kosong = awal periode' }, { name: 'end_date', label: 'Sampai tanggal', type: 'date', help: 'Kosong = akhir periode' },
         { name: 'skip_dates', label: 'Tanggal dikecualikan (libur, UTS/UAS)', type: 'textarea', placeholder: '2026-10-20, 2026-10-21 …', help: 'Pisahkan dengan koma/baris baru. Rentang: 2026-11-02..2026-11-07' },
         ...(R.hard ? [{ name: 'force', label: `Tetap publikasikan walau ada ${R.hard} bentrok (event yang bentrok dilewati)`, type: 'checkbox' }] : [])],
-      extra: '<p class="muted" style="margin-top:10px">Jadwal hasil publikasi sebelumnya untuk unit & periode ini akan diganti mulai tanggal di atas.</p>',
+      extra: '<p class="muted" style="margin-top:10px">Jadwal hasil publikasi sebelumnya akan diganti mulai tanggal di atas: proses <b>seluruh unit</b> menggantikan semua jadwal kuliah unit pada periode ini, proses <b>per program studi</b> hanya menggantikan jadwal program studi tersebut.</p>',
       onSubmit: async v => {
         const skip = []; String(v.skip_dates || '').split(/[\s,]+/).filter(Boolean).forEach(t => {
           const [a, b] = t.split('..'); if (!b) return skip.push(a);
@@ -280,4 +284,58 @@ async function ttResults(body, { period, unit, slots }, q) {
   await show();
   timer = setInterval(() => { if ($('.progress')) show(); else clearInterval(timer); }, 1500);
   App.cleanup = () => clearInterval(timer);
+}
+
+// Reset jadwal satu semester: seluruh universitas (Super Admin), satu fakultas/unit, atau satu program studi.
+// Hanya jadwal hasil penjadwalan (+ hasil proses) yang dihapus; data kelas hanya bila dicentang; kegiatan manual tidak disentuh.
+async function ttReset({ period, periods, unit, units, sub, subs }) {
+  const sa = App.isSA(), mySub = App.me.sub_unit_id, per = periods.find(p => p.id === period) || {};
+  const opts = [...(sa ? [['all', 'Seluruh universitas (semua fakultas dan program studi)']] : []), ...(mySub ? [] : [['unit', 'Satu fakultas / unit (semua program studinya)']]), ['sub', 'Satu program studi / sub unit']];
+  const first = mySub ? 'sub' : (sub ? 'sub' : (sa && !unit ? 'all' : 'unit'));
+  let subList = subs;
+  const m = UI.modal({ title: `Reset jadwal — ${per.name || ''}`, wide: true, body: `
+    <p>Menghapus <b>jadwal kuliah hasil penjadwalan</b> beserta hasil proses algoritma pada semester <b>${esc(per.name || '')}</b>. Kegiatan dan peminjaman yang dibuat manual <b>tidak</b> ikut terhapus.</p>
+    <div class="form-grid" style="margin-top:12px">
+      <label class="field full"><span>Cakupan</span><select id="rsc">${opts.map(([v, l]) => `<option value="${v}" ${v === first ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${sa ? `<label class="field" id="ruw"><span>Fakultas / unit</span><select id="ru">${UI.options(units.map(u => ({ value: u.id, label: u.name })), unit)}</select></label>` : ''}
+      <label class="field" id="rsw"><span>Program studi / sub unit</span><select id="rsub">${UI.options(subs.map(x => ({ value: x.id, label: x.name })), mySub || sub)}</select></label>
+      <label class="check full"><input type="checkbox" id="rcl"> Hapus juga data kelas semester ini (daftar kelas yang sudah dimasukkan)</label>
+    </div>
+    <div class="btn-row" style="margin-top:12px"><button class="btn" id="rpv">Hitung dampak</button></div>
+    <div id="rim" style="margin-top:10px" class="muted">Klik <b>Hitung dampak</b> sebelum menghapus.</div>
+    <label class="field" id="rtw" style="margin-top:10px" hidden><span>Ketik <b>RESET</b> untuk mengonfirmasi penghapusan seluruh universitas</span><input id="rtx" autocomplete="off"></label>`,
+  actions: [{ label: 'Batal' }, { label: 'Reset jadwal', kind: 'danger', onClick: async () => {
+    const body = payload(); if (body.scope === 'all' && $('#rtx', m.el).value.trim() !== 'RESET') throw new Error('Ketik RESET untuk melanjutkan');
+    const r = await API.post('/tt/reset', body);
+    UI.toast(`Jadwal direset: ${r.events} pertemuan, ${r.runs} hasil proses${body.include_classes ? `, ${r.classes} kelas` : ''} dihapus`); App.render();
+  } }] });
+  const go = $('.modal-foot .danger', m.el); go.disabled = true;
+  const payload = () => {
+    const scope = $('#rsc', m.el).value, u = $('#ru', m.el) ? Number($('#ru', m.el).value) : unit;
+    return { period_id: period, scope, unit_id: scope === 'all' ? null : u, sub_unit_id: scope === 'sub' ? Number($('#rsub', m.el).value) || null : null, include_classes: $('#rcl', m.el).checked };
+  };
+  const layout = () => {
+    const sc = $('#rsc', m.el).value;
+    if ($('#ruw', m.el)) $('#ruw', m.el).hidden = sc === 'all'; $('#rsw', m.el).hidden = sc !== 'sub'; $('#rtw', m.el).hidden = sc !== 'all';
+    $('#rsub', m.el).disabled = !!mySub; go.disabled = true; $('#rim', m.el).innerHTML = 'Klik <b>Hitung dampak</b> sebelum menghapus.';
+  };
+  $('#rsc', m.el).onchange = layout; $('#rcl', m.el).onchange = layout;
+  if ($('#ru', m.el)) $('#ru', m.el).onchange = async e => {
+    subList = await API.get('/sub-units', { unit_id: e.target.value, active: 1 }).then(r => r.rows);
+    $('#rsub', m.el).innerHTML = UI.options(subList.map(x => ({ value: x.id, label: x.name })), ''); layout();
+  };
+  $('#rsub', m.el).onchange = layout;
+  $('#rpv', m.el).onclick = async () => {
+    try {
+      const b = payload();
+      if (b.scope === 'sub' && !b.sub_unit_id) throw new Error('Pilih program studi');
+      const r = await API.post('/tt/reset/preview', b);
+      const target = b.scope === 'all' ? 'seluruh universitas' : b.scope === 'unit' ? `fakultas/unit ${esc((units.find(x => x.id === b.unit_id) || { name: App.me.unit_name }).name || '')}` : `program studi ${esc(($('#rsub', m.el).selectedOptions[0] || {}).text || '')}`;
+      $('#rim', m.el).innerHTML = r.running ? `<div class="form-error">Ada ${r.running} proses penjadwalan yang masih berjalan pada cakupan ini. Hentikan dulu di tab Proses & hasil.</div>`
+        : `<div class="panel panel-body"><b>Yang akan dihapus untuk ${target}:</b><ul style="margin:8px 0 0 18px"><li>${fmt.num(r.events)} pertemuan kuliah di jadwal</li><li>${fmt.num(r.runs)} hasil proses penjadwalan</li>${b.include_classes ? `<li>${fmt.num(r.classes)} kelas</li>` : `<li class="muted">${fmt.num(r.classes_total)} kelas dipertahankan</li>`}</ul></div>`;
+      go.disabled = !!r.running || (!r.events && !r.runs && !(b.include_classes && r.classes));
+      if (go.disabled && !r.running) $('#rim', m.el).innerHTML += '<p class="muted" style="margin-top:8px">Tidak ada yang perlu dihapus.</p>';
+    } catch (e) { UI.formError(m.body, e); }
+  };
+  layout();
 }

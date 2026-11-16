@@ -5,7 +5,7 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const { db, tx } = require('../db');
 const { ah, fail, pick, audit, setClause, orderBy } = require('../util');
-const { sign, signAs, authRequired, roles, isSA } = require('../auth');
+const { sign, signAs, authRequired, roles, isSA, canManageSub } = require('../auth');
 const crud = require('../crud');
 
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads'));
@@ -49,8 +49,10 @@ r.get('/auth/me', ah(async (req, res) => {
 r.post('/auth/impersonate', roles('superadmin'), ah(async (req, res) => {
   const t = req.body.user_id
     ? await db.one('SELECT u.*, n.name unit_name FROM users u LEFT JOIN units n ON n.id=u.unit_id WHERE u.id=$1', [req.body.user_id])
-    : await db.one(`SELECT u.*, n.name unit_name FROM users u JOIN units n ON n.id=u.unit_id WHERE u.unit_id=$1 AND u.role='unit_admin' ORDER BY u.is_unit_primary DESC, u.id LIMIT 1`, [req.body.unit_id]);
-  if (!t) fail(404, 'Unit ini belum memiliki akun admin');
+    : req.body.sub_unit_id
+      ? await db.one(`SELECT u.*, n.name || ' › ' || su.name unit_name FROM users u JOIN units n ON n.id=u.unit_id JOIN sub_units su ON su.id=u.sub_unit_id WHERE u.sub_unit_id=$1 AND u.role='unit_admin' ORDER BY u.is_sub_primary DESC, u.id LIMIT 1`, [req.body.sub_unit_id])
+      : await db.one(`SELECT u.*, n.name unit_name FROM users u JOIN units n ON n.id=u.unit_id WHERE u.unit_id=$1 AND u.role='unit_admin' AND u.sub_unit_id IS NULL ORDER BY u.is_unit_primary DESC, u.id LIMIT 1`, [req.body.unit_id]);
+  if (!t) fail(404, 'Unit/sub unit ini belum memiliki akun admin');
   if (t.role === 'superadmin') fail(400, 'Tidak dapat masuk sebagai Super Admin');
   await audit(null, req.user, 'impersonate', 'users', t.id, { unit_id: t.unit_id, target: t.username });
   res.json({ token: signAs(t.id, req.user.id), user: { username: t.username, name: t.name, unit_name: t.unit_name } });
@@ -133,22 +135,33 @@ r.delete('/files/:id', ah(async (req, res) => {
 
 // ---------------- Pengguna ----------------
 r.get('/users', roles('superadmin'), ah(async (req, res) => {
-  res.json({ rows: await db.q(`SELECT u.id,u.username,u.name,u.email,u.phone,u.role,u.unit_id,u.active,u.is_unit_primary,u.last_login_at,
-    (u.password_hash IS NOT NULL) has_password, un.name unit_name FROM users u LEFT JOIN units un ON un.id=u.unit_id ORDER BY u.role, un.name, u.username`) });
+  res.json({ rows: await db.q(`SELECT u.id,u.username,u.name,u.email,u.phone,u.role,u.unit_id,u.sub_unit_id,u.active,u.is_unit_primary,u.is_sub_primary,u.last_login_at,
+    (u.password_hash IS NOT NULL) has_password, un.name unit_name, su.name sub_unit_name FROM users u LEFT JOIN units un ON un.id=u.unit_id LEFT JOIN sub_units su ON su.id=u.sub_unit_id
+    ORDER BY u.role, un.name, su.name NULLS FIRST, u.username`) });
 }));
-const USER_FIELDS = ['username', 'name', 'email', 'phone', 'role', 'unit_id', 'active'];
+const USER_FIELDS = ['username', 'name', 'email', 'phone', 'role', 'unit_id', 'sub_unit_id', 'active'];
+const checkSub = async d => {
+  if (d.role && d.role !== 'unit_admin') d.sub_unit_id = null;
+  if (d.sub_unit_id) {
+    const sub = await db.one('SELECT unit_id FROM sub_units WHERE id=$1', [d.sub_unit_id]);
+    if (!sub) fail(400, 'Sub unit tidak ditemukan');
+    if (d.unit_id && Number(sub.unit_id) !== Number(d.unit_id)) fail(400, 'Sub unit bukan bagian dari unit yang dipilih');
+  }
+};
 r.post('/users', roles('superadmin'), ah(async (req, res) => {
   const d = pick(req.body, USER_FIELDS);
   if (d.role === 'unit_admin' && !d.unit_id) fail(400, 'Admin unit wajib memiliki unit');
+  await checkSub(d);
   if (!req.body.password || req.body.password.length < 8) fail(400, 'Password minimal 8 karakter');
-  const u = await db.one(`INSERT INTO users (username,name,email,phone,role,unit_id,active,password_hash,must_change_password)
-    VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),$8,true) RETURNING id,username`,
-  [d.username, d.name, d.email, d.phone, d.role, d.unit_id, d.active, await bcrypt.hash(req.body.password, 10)]);
+  const u = await db.one(`INSERT INTO users (username,name,email,phone,role,unit_id,sub_unit_id,active,password_hash,must_change_password)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8,true),$9,true) RETURNING id,username`,
+  [d.username, d.name, d.email, d.phone, d.role, d.unit_id, d.sub_unit_id || null, d.active, await bcrypt.hash(req.body.password, 10)]);
   await audit(null, req.user, 'create', 'users', u.id);
   res.status(201).json(u);
 }));
 r.put('/users/:id', roles('superadmin'), ah(async (req, res) => {
   const d = pick(req.body, USER_FIELDS);
+  if (d.sub_unit_id) { const cur = await db.one('SELECT unit_id FROM users WHERE id=$1', [req.params.id]); await checkSub({ ...d, unit_id: d.unit_id || (cur && cur.unit_id) }); }
   if (req.body.password) {
     if (req.body.password.length < 8) fail(400, 'Password minimal 8 karakter');
     d.password_hash = await bcrypt.hash(req.body.password, 10); d.must_change_password = true;
@@ -160,7 +173,7 @@ r.put('/users/:id', roles('superadmin'), ah(async (req, res) => {
 }));
 r.delete('/users/:id', roles('superadmin'), ah(async (req, res) => {
   if (Number(req.params.id) === req.user.id) fail(400, 'Tidak dapat menghapus akun sendiri');
-  await db.query('DELETE FROM users WHERE id=$1 AND NOT is_unit_primary', [req.params.id]);
+  await db.query('DELETE FROM users WHERE id=$1 AND NOT is_unit_primary AND NOT is_sub_primary', [req.params.id]);
   res.json({ ok: true });
 }));
 
@@ -169,6 +182,7 @@ r.get('/units', ah(async (req, res) => {
   res.json({ rows: await db.q(`SELECT un.*, a.id admin_id, a.username admin_username, a.name admin_name, a.email admin_email, a.active admin_active,
       (a.password_hash IS NOT NULL) admin_ready,
       (SELECT count(*) FROM v_room_owner o WHERE o.unit_id=un.id) room_count,
+      (SELECT count(*) FROM sub_units s WHERE s.unit_id=un.id) sub_unit_count,
       (SELECT string_agg(DISTINCT b.name, ', ') FROM unit_assignments ua JOIN buildings b ON b.id=ua.building_id WHERE ua.unit_id=un.id) buildings
     FROM units un LEFT JOIN users a ON a.unit_id=un.id AND a.is_unit_primary ORDER BY un.name`) });
 }));
@@ -215,6 +229,79 @@ r.put('/units/:id/admin', roles('superadmin'), ah(async (req, res) => {
   await audit(null, req.user, 'update_admin', 'units', Number(req.params.id));
   res.json({ ok: true });
 }));
+// ---------------- Sub unit (mis. program studi di bawah fakultas) ----------------
+const SUB_FIELDS = ['code', 'name', 'kind', 'description', 'head_name', 'head_nip', 'email', 'phone', 'active'];
+const SUB_SQL = `SELECT s.*, un.name unit_name, un.code unit_code, a.id admin_id, a.username admin_username, a.name admin_name, a.email admin_email, a.active admin_active,
+    (a.password_hash IS NOT NULL) admin_ready,
+    (SELECT count(*) FROM course_classes cc WHERE cc.sub_unit_id=s.id) class_count,
+    (SELECT count(*) FROM courses c WHERE c.sub_unit_id=s.id) course_count
+  FROM sub_units s JOIN units un ON un.id=s.unit_id LEFT JOIN users a ON a.sub_unit_id=s.id AND a.is_sub_primary`;
+r.get('/sub-units', ah(async (req, res) => {
+  const p = [], w = ['TRUE'];
+  if (req.query.unit_id) { p.push(req.query.unit_id); w.push(`s.unit_id=$${p.length}`); }
+  if (req.query.active === '1') w.push('s.active');
+  res.json({ rows: await db.q(`${SUB_SQL} WHERE ${w.join(' AND ')} ORDER BY un.name, s.name`, p) });
+}));
+r.post('/sub-units', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
+  const d = pick(req.body, SUB_FIELDS);
+  const unitId = req.user.role === 'superadmin' ? Number(req.body.unit_id) : req.user.unit_id;
+  if (req.user.sub_unit_id) fail(403, 'Admin sub unit tidak dapat menambah sub unit');
+  if (!unitId) fail(400, 'Pilih unit induk');
+  if (!d.code || !d.name) fail(400, 'Kode dan nama sub unit wajib diisi');
+  const out = await tx(async c => {
+    const un = await c.one('SELECT code FROM units WHERE id=$1', [unitId]);
+    if (!un) fail(400, 'Unit induk tidak ditemukan');
+    const s = await c.one(`INSERT INTO sub_units (unit_id,code,name,kind,description,head_name,head_nip,email,phone) VALUES ($1,$2,$3,COALESCE($4,'prodi'),$5,$6,$7,$8,$9) RETURNING *`,
+      [unitId, d.code.toUpperCase(), d.name, d.kind, d.description, d.head_name, d.head_nip, d.email, d.phone]);
+    const username = ('admin.' + un.code + '.' + d.code).toLowerCase().replace(/[^a-z0-9.]+/g, '');
+    await c.query(`INSERT INTO users (username,name,role,unit_id,sub_unit_id,is_sub_primary,active) VALUES ($1,$2,'unit_admin',$3,$4,true,false)`, [username, 'Admin ' + d.name, unitId, s.id]);
+    await audit(c, req.user, 'create', 'sub_units', s.id, d);
+    return { ...s, admin_username: username };
+  });
+  res.status(201).json(out);
+}));
+const loadSub = async id => { const s = await db.one('SELECT * FROM sub_units WHERE id=$1', [id]); if (!s) fail(404, 'Sub unit tidak ditemukan'); return s; };
+r.put('/sub-units/:id', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
+  const s = await loadSub(req.params.id);
+  if (!canManageSub(req.user, s)) fail(403, 'Anda tidak mengelola sub unit ini');
+  let f = SUB_FIELDS;
+  if (req.user.sub_unit_id) f = f.filter(k => !['code', 'kind', 'active'].includes(k));   // admin prodi: hanya data profil
+  const { sql, values } = setClause(pick(req.body, f), 2);
+  if (!sql) fail(400, 'Tidak ada data yang diubah');
+  const row = await db.one(`UPDATE sub_units SET ${sql} WHERE id=$1 RETURNING *`, [s.id, ...values]);
+  await audit(null, req.user, 'update', 'sub_units', s.id);
+  res.json(row);
+}));
+r.delete('/sub-units/:id', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
+  const s = await loadSub(req.params.id);
+  if (req.user.sub_unit_id || !canManageSub(req.user, s)) fail(403, 'Anda tidak dapat menghapus sub unit ini');
+  await db.query('DELETE FROM sub_units WHERE id=$1', [s.id]);   // kelas menjadi tingkat unit; akun admin sub unit ikut terhapus
+  await audit(null, req.user, 'delete', 'sub_units', s.id, { code: s.code });
+  res.json({ ok: true });
+}));
+// Akun admin sub unit: dikelola Super Admin atau admin unit induknya
+r.put('/sub-units/:id/admin', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
+  const s = await loadSub(req.params.id);
+  if (req.user.sub_unit_id || !canManageSub(req.user, s)) fail(403, 'Anda tidak dapat mengelola akun sub unit ini');
+  const d = pick(req.body, ['username', 'name', 'email', 'phone', 'active']);
+  if (req.body.password) {
+    if (req.body.password.length < 8) fail(400, 'Password minimal 8 karakter');
+    d.password_hash = await bcrypt.hash(req.body.password, 10); d.must_change_password = true;
+    if (d.active === undefined) d.active = true;
+  }
+  const ex = await db.one('SELECT id, password_hash FROM users WHERE sub_unit_id=$1 AND is_sub_primary', [s.id]);
+  if (d.active && !d.password_hash && !(ex && ex.password_hash)) fail(400, 'Isi password sebelum mengaktifkan akun');
+  if (ex) {
+    const { sql, values } = setClause(d, 2);
+    if (sql) await db.query(`UPDATE users SET ${sql} WHERE id=$1`, [ex.id, ...values]);
+  } else {
+    await db.query(`INSERT INTO users (username,name,email,phone,role,unit_id,sub_unit_id,is_sub_primary,active,password_hash,must_change_password)
+      VALUES ($1,$2,$3,$4,'unit_admin',$5,$6,true,$7,$8,true)`, [d.username, d.name, d.email, d.phone, s.unit_id, s.id, !!d.active, d.password_hash || null]);
+  }
+  await audit(null, req.user, 'update_admin', 'sub_units', s.id);
+  res.json({ ok: true });
+}));
+
 r.get('/units/:id/assignments', ah(async (req, res) => {
   res.json(await db.q(`SELECT ua.id, ua.building_id, b.name building_name, ua.room_id, r.code room_code, r.name room_name, rb.name room_building
     FROM unit_assignments ua LEFT JOIN buildings b ON b.id=ua.building_id LEFT JOIN rooms r ON r.id=ua.room_id LEFT JOIN buildings rb ON rb.id=r.building_id
@@ -262,16 +349,24 @@ r.use('/periods', crud({
   table: 'academic_periods', fields: ['name', 'start_date', 'end_date', 'is_active'], order: 't.start_date DESC',
   beforeSave: async (d, req, id) => { if (d.is_active === true || d.is_active === 'true') await db.query('UPDATE academic_periods SET is_active=false WHERE id<>COALESCE($1,0)', [id]); return d; },
 }));
+// Admin sub unit (prodi) hanya boleh mengubah/menghapus data sub unitnya sendiri; data baru otomatis milik sub unit-nya
+const subOwn = table => async (d, req, id) => {
+  const u = req.user; if (!u.sub_unit_id) return d;
+  if (id) { const ex = await db.one(`SELECT sub_unit_id FROM ${table} WHERE id=$1`, [id]); if (ex && Number(ex.sub_unit_id) !== Number(u.sub_unit_id)) fail(403, 'Data ini bukan milik sub unit Anda'); }
+  if (req.method !== 'DELETE') { d.sub_unit_id = u.sub_unit_id; d.unit_id = u.unit_id; }
+  return d;
+};
 r.use('/people', crud({
-  table: 'people', fields: ['id_number', 'name', 'kind', 'unit_id', 'position', 'email', 'phone', 'active'],
-  select: 'SELECT t.*, u.name unit_name FROM people t LEFT JOIN units u ON u.id=t.unit_id',
-  search: ['t.name', 't.id_number'], filters: { kind: 't.kind', unit_id: 't.unit_id' }, order: 't.name', write: ['superadmin', 'unit_admin'],
+  table: 'people', fields: ['id_number', 'name', 'kind', 'unit_id', 'sub_unit_id', 'position', 'email', 'phone', 'active'],
+  select: 'SELECT t.*, u.name unit_name, su.name sub_unit_name FROM people t LEFT JOIN units u ON u.id=t.unit_id LEFT JOIN sub_units su ON su.id=t.sub_unit_id',
+  search: ['t.name', 't.id_number'], filters: { kind: 't.kind', unit_id: 't.unit_id', sub_unit_id: 't.sub_unit_id' }, order: 't.name', write: ['superadmin', 'unit_admin'],
+  beforeSave: subOwn('people'),
 }));
 r.use('/courses', crud({
-  table: 'courses', fields: ['code', 'name', 'credits', 'semester_level', 'unit_id', 'tags', 'preferred_category_id'],
-  select: 'SELECT t.*, u.name unit_name, c.name category_name FROM courses t LEFT JOIN units u ON u.id=t.unit_id LEFT JOIN room_categories c ON c.id=t.preferred_category_id',
-  search: ['t.name', 't.code'], filters: { unit_id: 't.unit_id' }, order: 't.code', write: ['superadmin', 'unit_admin'],
-  beforeSave: async d => { if (typeof d.tags === 'string') d.tags = d.tags.split(',').map(s => s.trim().toLowerCase()).filter(Boolean); return d; },
+  table: 'courses', fields: ['code', 'name', 'credits', 'semester_level', 'unit_id', 'sub_unit_id', 'tags', 'preferred_category_id'],
+  select: 'SELECT t.*, u.name unit_name, su.name sub_unit_name, c.name category_name FROM courses t LEFT JOIN units u ON u.id=t.unit_id LEFT JOIN sub_units su ON su.id=t.sub_unit_id LEFT JOIN room_categories c ON c.id=t.preferred_category_id',
+  search: ['t.name', 't.code'], filters: { unit_id: 't.unit_id', sub_unit_id: 't.sub_unit_id' }, order: 't.code', write: ['superadmin', 'unit_admin'],
+  beforeSave: async (d, req, id) => { d = await subOwn('courses')(d, req, id); if (typeof d.tags === 'string') d.tags = d.tags.split(',').map(s => s.trim().toLowerCase()).filter(Boolean); return d; },
 }));
 
 module.exports = { router: r, upload, saveAttachment, UPLOAD_DIR };

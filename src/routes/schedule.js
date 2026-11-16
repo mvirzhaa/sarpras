@@ -27,9 +27,9 @@ async function conflictsFor(c, roomId, s, e) {
 async function insertEvents(c, base, occ) {
   const series = occ.length > 1 ? crypto.randomUUID() : null, created = [], skipped = [];
   for (const [s, e] of occ) {
-    const row = await c.one(`INSERT INTO events (room_id,title,event_type,description,start_at,end_at,unit_id,lecturer_id,participants,series_id,booking_id,created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING RETURNING id`,
-    [base.room_id, base.title, base.event_type || 'lainnya', base.description, s, e, base.unit_id, base.lecturer_id || null, base.participants || null, series, base.booking_id || null, base.created_by]);
+    const row = await c.one(`INSERT INTO events (room_id,title,event_type,description,start_at,end_at,unit_id,lecturer_id,participants,series_id,booking_id,created_by,sub_unit_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING RETURNING id`,
+    [base.room_id, base.title, base.event_type || 'lainnya', base.description, s, e, base.unit_id, base.lecturer_id || null, base.participants || null, series, base.booking_id || null, base.created_by, base.sub_unit_id || null]);
     if (row) created.push(row.id); else skipped.push(s);
   }
   if (occ.length === 1 && skipped.length) {
@@ -50,9 +50,10 @@ r.get('/events', ah(async (req, res) => {
   if (q.unit_id) add(q.unit_id, 'o.unit_id=?');
   if (q.building_id) add(q.building_id, 'rm.building_id=?');
   if (q.organizer_unit_id) add(q.organizer_unit_id, 'e.unit_id=?');
+  if (q.sub_unit_id) add(q.sub_unit_id, 'e.sub_unit_id=?');
   if (!q.from && !q.to && !q.room_id) fail(400, 'Tentukan rentang waktu');
-  res.json(await db.q(`SELECT e.*, rm.code room_code, rm.name room_name, b.name building_name, u.name unit_name, pp.name lecturer_name, o.unit_id owner_unit_id
-    FROM events e JOIN rooms rm ON rm.id=e.room_id JOIN buildings b ON b.id=rm.building_id LEFT JOIN units u ON u.id=e.unit_id
+  res.json(await db.q(`SELECT e.*, rm.code room_code, rm.name room_name, b.name building_name, u.name unit_name, su.name sub_unit_name, pp.name lecturer_name, o.unit_id owner_unit_id
+    FROM events e LEFT JOIN sub_units su ON su.id=e.sub_unit_id JOIN rooms rm ON rm.id=e.room_id JOIN buildings b ON b.id=rm.building_id LEFT JOIN units u ON u.id=e.unit_id
     LEFT JOIN people pp ON pp.id=e.lecturer_id LEFT JOIN v_room_owner o ON o.room_id=e.room_id
     WHERE ${w.join(' AND ')} ORDER BY e.start_at LIMIT 3000`, p));
 }));
@@ -66,7 +67,7 @@ r.post('/events', ah(async (req, res) => {
   if (rm.status === 'nonaktif') fail(409, 'Ruangan sedang nonaktif');
   const out = await tx(async c => {
     const owner = await ownerUnit(d.room_id, c);
-    const result = await insertEvents(c, { ...d, unit_id: req.body.unit_id || req.user.unit_id || owner, created_by: req.user.id }, occurrences(d.start_at, d.end_at, d.repeat_until));
+    const result = await insertEvents(c, { ...d, unit_id: req.body.unit_id || req.user.unit_id || owner, sub_unit_id: req.user.sub_unit_id || req.body.sub_unit_id || null, created_by: req.user.id }, occurrences(d.start_at, d.end_at, d.repeat_until));
     await audit(c, req.user, 'create', 'events', result.created[0], { room_id: d.room_id, n: result.created.length });
     return result;
   });
@@ -101,8 +102,9 @@ r.delete('/events/:id', ah(async (req, res) => {
 }));
 
 // ---------------- Cari ruang kosong (lintas unit) ----------------
-// Dipakai juga oleh asisten Rendra (src/services/rendra.js)
-async function findFreeRooms(user, { start_at, end_at, capacity, category_id, building_id, repeat_until }) {
+r.get('/availability', ah(async (req, res) => {
+  const { start_at, end_at, capacity, category_id, building_id, repeat_until } = req.query;
+  if (!start_at || !end_at) fail(400, 'Tentukan waktu mulai dan selesai');
   const occ = occurrences(start_at, end_at, repeat_until);
   const p = [Number(capacity) || 0], w = ['c.bookable', `r.status='aktif'`, 'r.capacity >= $1'];
   if (category_id) { p.push(category_id); w.push(`r.category_id=$${p.length}`); }
@@ -114,13 +116,8 @@ async function findFreeRooms(user, { start_at, end_at, capacity, category_id, bu
     LEFT JOIN v_room_owner o ON o.room_id=r.id LEFT JOIN units u ON u.id=o.unit_id
     WHERE ${w.join(' AND ')} AND NOT EXISTS (SELECT 1 FROM events e WHERE e.room_id=r.id AND e.status='confirmed'
       AND tstzrange(e.start_at,e.end_at) && ANY(ARRAY[${ranges.join(',')}]))
-    ORDER BY (o.unit_id = ${Number(user.unit_id) || 0}) DESC, r.capacity, b.code, r.code LIMIT 200`, p);
-  return rows.map(x => ({ ...x, mine: isSA(user) || x.owner_unit_id === user.unit_id }));
-}
-r.get('/availability', ah(async (req, res) => {
-  const { start_at, end_at } = req.query;
-  if (!start_at || !end_at) fail(400, 'Tentukan waktu mulai dan selesai');
-  res.json(await findFreeRooms(req.user, req.query));
+    ORDER BY (o.unit_id = ${Number(req.user.unit_id) || 0}) DESC, r.capacity, b.code, r.code LIMIT 200`, p);
+  res.json(rows.map(x => ({ ...x, mine: isSA(req.user) || x.owner_unit_id === req.user.unit_id })));
 }));
 
 // ---------------- Peminjaman antar unit ----------------

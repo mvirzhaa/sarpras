@@ -8,6 +8,9 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { HttpError } = require('./util');
 
+// Sumber ubin peta (bisa diganti lewat .env: TILE_HOSTS=https://tiles.kampus.ac.id,...)
+const TILE_HOSTS = (process.env.TILE_HOSTS || 'https://tile.openstreetmap.org,https://*.tile.openstreetmap.org,https://server.arcgisonline.com').split(',').map(s => s.trim()).filter(Boolean);
+
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet({
@@ -15,11 +18,13 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      workerSrc: ["'self'", 'blob:'],
+      childSrc: ["'self'", 'blob:'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdn.jsdelivr.net'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:', 'blob:'],
+      imgSrc: ["'self'", 'data:', 'blob:', ...TILE_HOSTS],
       mediaSrc: ["'self'", 'blob:'],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", 'blob:', ...TILE_HOSTS],
     },
   },
 }));

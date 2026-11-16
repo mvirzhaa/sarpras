@@ -6,7 +6,7 @@ const SHEETS = {
   dosen: { name: 'Dosen', cols: [['id_number', 'NIDN/NIP', 16], ['name', 'Nama Dosen', 34], ['email', 'Email', 28], ['phone', 'Telepon', 16]] },
   mk: { name: 'Mata Kuliah', cols: [['code', 'Kode MK', 11], ['name', 'Nama Mata Kuliah', 40], ['credits', 'SKS', 6], ['semester_level', 'Semester', 10], ['tags', 'Tag', 22], ['category', 'Kategori Ruang', 20]] },
   kelas: { name: 'Kelas', cols: [['course_code', 'Kode MK', 11], ['class_name', 'Kelas', 8], ['student_group', 'Rombel', 10], ['lecturer', 'Dosen (NIDN/Nama)', 30], ['student_count', 'Jumlah Mahasiswa', 12],
-    ['duration_slots', 'Durasi (sesi)', 11], ['sessions_per_week', 'Pertemuan/Pekan', 12], ['category', 'Kategori Ruang Wajib', 20], ['fixed_room', 'Kode Ruang Tetap', 15], ['note', 'Catatan', 30]] },
+    ['duration_slots', 'Durasi (sesi)', 11], ['sessions_per_week', 'Pertemuan/Pekan', 12], ['category', 'Kategori Ruang Wajib', 20], ['fixed_room', 'Kode Ruang Tetap', 15], ['note', 'Catatan', 30], ['sub_unit', 'Program Studi (kode)', 18]] },
   kendala: { name: 'Kendala', cols: [['type', 'Jenis', 26], ['scope', 'Berlaku Untuk', 14], ['values', 'Nilai', 34], ['days', 'Hari', 22], ['slots', 'Sesi', 10], ['hard', 'Wajib', 8], ['weight', 'Bobot', 8], ['note', 'Keterangan', 34]] },
 };
 const JENIS = ['Utamakan pagi', 'Utamakan sore', 'Hanya pada', 'Tidak pada', 'Maks kelas dosen per hari', 'Padatkan rombel', 'Sebar pertemuan'];
@@ -38,6 +38,7 @@ function parseSlots(s) {
 // ---------- Template / contoh ----------
 async function buildWorkbook({ unitId, sample }) {
   const cats = (await pool.query('SELECT name FROM room_categories ORDER BY sort, name')).rows.map(r => r.name);
+  const subs = (await pool.query(`SELECT code FROM sub_units WHERE ($1::int IS NULL OR unit_id=$1) ORDER BY code`, [unitId || null])).rows.map(r => r.code);
   const rooms = (await pool.query(`SELECT r.code FROM rooms r LEFT JOIN v_room_owner o ON o.room_id=r.id WHERE ($1::int IS NULL OR o.unit_id=$1) ORDER BY r.code`, [unitId || null])).rows.map(r => r.code);
   const wb = new ExcelJS.Workbook(); wb.creator = 'SARPRAS';
   const F = { name: 'Arial', size: 10 };
@@ -57,6 +58,7 @@ async function buildWorkbook({ unitId, sample }) {
     ['Sheet Mata Kuliah', 'Tag dipisah titik koma, dipakai pada kendala (mis. matematika;dasar). Kategori ruang = kategori yang disukai. Contoh: IF101 | Kalkulus I | 3 | 1 | matematika | Ruang Kelas'],
     ['Sheet Kelas', 'Satu baris = satu kelas paralel. Rombel tidak boleh bentrok satu sama lain. Durasi = jumlah sesi berurutan (umumnya = SKS; praktikum 1 SKS = 3 sesi). Dosen boleh berupa NIDN atau nama persis; dosen baru dibuat otomatis.'],
     ['', 'Contoh: IF101 | A | TI-1A | 0401018801 | 40 | 3 | 1 | Ruang Kelas |  | '],
+    ['', 'Kolom Program Studi (kode sub unit, mis. TI) boleh dikosongkan: kelas dianggap milik tingkat unit, atau milik program studi yang dipilih saat impor. Admin program studi hanya dapat mengimpor kelas program studinya sendiri.'],
     ['Sheet Kendala', 'Jenis: ' + JENIS.join(', ') + '. Berlaku untuk: ' + SCOPE.join(', ') + '.'],
     ['', 'Nilai: daftar tag / kode MK / NIDN atau nama dosen / rombel, dipisah titik koma. Untuk "Maks kelas dosen per hari", isi angka maksimum.'],
     ['', 'Hari: Senin;Rabu atau rentang Senin-Rabu. Sesi: nomor sesi seperti 6 atau 1-4 atau 1-4;12-14 (lihat menu Sesi kuliah). Wajib: Ya = harus dipenuhi; Tidak = preferensi berbobot.'],
@@ -67,7 +69,7 @@ async function buildWorkbook({ unitId, sample }) {
   lines.forEach((l, i) => { const r = pt.addRow(l); r.font = F; if (i === 0) r.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FF146B4E' } }; else if (l[0]) r.getCell(1).font = { ...F, bold: true }; r.getCell(2).alignment = { wrapText: true, vertical: 'top' }; });
 
   const ref = wb.addWorksheet('Referensi');
-  const refCols = [['Kategori Ruang', cats], ['Hari', HARI_NAMA.slice(1)], ['Ya/Tidak', ['Ya', 'Tidak']], ['Jenis Kendala', JENIS], ['Berlaku Untuk', SCOPE], ['Kode Ruang', rooms]];
+  const refCols = [['Kategori Ruang', cats], ['Hari', HARI_NAMA.slice(1)], ['Ya/Tidak', ['Ya', 'Tidak']], ['Jenis Kendala', JENIS], ['Berlaku Untuk', SCOPE], ['Kode Ruang', rooms], ['Kode Program Studi', subs]];
   refCols.forEach(([h, vals], i) => { ref.getCell(1, i + 1).value = h; ref.getCell(1, i + 1).font = { ...F, bold: true }; vals.forEach((v, j) => { ref.getCell(j + 2, i + 1).value = v; }); ref.getColumn(i + 1).width = 26; });
   const rng = (i, n) => `Referensi!$${String.fromCharCode(65 + i)}$2:$${String.fromCharCode(65 + i)}$${Math.max(2, n + 1)}`;
 
@@ -85,6 +87,7 @@ async function buildWorkbook({ unitId, sample }) {
   dv(sheets.mk, 'F', rng(0, cats.length));
   dv(sheets.kelas, 'H', rng(0, cats.length));
   if (rooms.length) dv(sheets.kelas, 'I', rng(5, rooms.length));
+  if (subs.length) dv(sheets.kelas, 'K', rng(6, subs.length));
   dv(sheets.kendala, 'A', rng(3, JENIS.length), 100); dv(sheets.kendala, 'B', rng(4, SCOPE.length), 100); dv(sheets.kendala, 'F', rng(2, 2), 100);
   for (const c of ['E', 'F', 'G']) for (let r = 2; r <= 400; r++) sheets.kelas.getCell(`${c}${r}`).dataValidation = { type: 'whole', allowBlank: true, operator: 'between', formulae: [1, 500], showErrorMessage: true, error: 'Isi bilangan bulat' };
   wb.worksheets.forEach((w, i) => { if (w.name === 'Referensi') w.state = 'hidden'; });
@@ -118,7 +121,7 @@ async function parseWorkbook(buf) {
 }
 
 // ---------- Simpan ke basis data (dry run = rollback) ----------
-async function importData({ periodId, unitId, data, dryRun }) {
+async function importData({ periodId, unitId, subUnitId = null, guardSub = null, data, dryRun }) {
   const c = await pool.connect();
   const q = async (t, p) => (await c.query(t, p)).rows;
   const S = { dosen: { created: 0, updated: 0 }, mk: { created: 0, updated: 0 }, kelas: { created: 0, updated: 0 }, constraints: [], errors: [], warnings: [...(data.warnings || [])], preview: [] };
@@ -140,16 +143,18 @@ async function importData({ periodId, unitId, data, dryRun }) {
       if (!x.name) throw new Error('nama dosen kosong');
       const ex = x.id_number ? (await q('SELECT id FROM people WHERE id_number=$1', [x.id_number]))[0] : (await q('SELECT id FROM people WHERE lower(name)=lower($1) LIMIT 1', [x.name]))[0];
       if (ex) { await q(`UPDATE people SET name=$2, email=COALESCE($3,email), phone=COALESCE($4,phone), kind='dosen' WHERE id=$1`, [ex.id, x.name, x.email || null, x.phone || null]); S.dosen.updated++; }
-      else { await q(`INSERT INTO people (id_number,name,email,phone,kind,unit_id) VALUES ($1,$2,$3,$4,'dosen',$5)`, [x.id_number || null, x.name, x.email || null, x.phone || null, unitId]); S.dosen.created++; }
+      else { await q(`INSERT INTO people (id_number,name,email,phone,kind,unit_id,sub_unit_id) VALUES ($1,$2,$3,$4,'dosen',$5,$6)`, [x.id_number || null, x.name, x.email || null, x.phone || null, unitId, subUnitId]); S.dosen.created++; }
     });
     // Mata kuliah
     for (const x of data.mk) await attempt(`Mata Kuliah baris ${x._row}`, async () => {
       if (!x.code || !x.name) throw new Error('kode dan nama MK wajib');
-      const r = await q(`INSERT INTO courses (code,name,credits,semester_level,unit_id,tags,preferred_category_id) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      const r = await q(`INSERT INTO courses (code,name,credits,semester_level,unit_id,sub_unit_id,tags,preferred_category_id) VALUES ($1,$2,$3,$4,$5,$8,$6,$7)
         ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, credits=EXCLUDED.credits, semester_level=COALESCE(EXCLUDED.semester_level,courses.semester_level),
-          tags=EXCLUDED.tags, preferred_category_id=COALESCE(EXCLUDED.preferred_category_id,courses.preferred_category_id), unit_id=COALESCE(courses.unit_id,EXCLUDED.unit_id)
+          tags=EXCLUDED.tags, preferred_category_id=COALESCE(EXCLUDED.preferred_category_id,courses.preferred_category_id), unit_id=COALESCE(courses.unit_id,EXCLUDED.unit_id), sub_unit_id=COALESCE(courses.sub_unit_id,EXCLUDED.sub_unit_id)
+        ${guardSub ? 'WHERE courses.sub_unit_id=EXCLUDED.sub_unit_id OR courses.sub_unit_id IS NULL' : ''}
         RETURNING (xmax = 0) inserted`,
-      [x.code.trim(), x.name, Number(x.credits) || 2, Number(x.semester_level) || null, unitId, list(x.tags).map(t => t.toLowerCase()), catId(x.category, 'Mata Kuliah')]);
+      [x.code.trim(), x.name, Number(x.credits) || 2, Number(x.semester_level) || null, unitId, list(x.tags).map(t => t.toLowerCase()), catId(x.category, 'Mata Kuliah'), subUnitId]);
+      if (!r.length) throw new Error(`MK ${x.code} dimiliki sub unit lain`);
       r[0].inserted ? S.mk.created++ : S.mk.updated++;
     });
     // Kelas
@@ -160,21 +165,31 @@ async function importData({ periodId, unitId, data, dryRun }) {
       let lect = null;
       if (x.lecturer) {
         lect = await findLect(x.lecturer);
-        if (!lect) { lect = (await q(`INSERT INTO people (name,kind,unit_id) VALUES ($1,'dosen',$2) RETURNING id`, [x.lecturer.trim(), unitId]))[0]; S.warnings.push(`Kelas baris ${x._row}: dosen "${x.lecturer}" belum ada, dibuat otomatis`); }
+        if (!lect) { lect = (await q(`INSERT INTO people (name,kind,unit_id,sub_unit_id) VALUES ($1,'dosen',$2,$3) RETURNING id`, [x.lecturer.trim(), unitId, subUnitId]))[0]; S.warnings.push(`Kelas baris ${x._row}: dosen "${x.lecturer}" belum ada, dibuat otomatis`); }
       }
       let room = null;
       if (x.fixed_room) {
         room = (await q(`SELECT r.id FROM rooms r LEFT JOIN v_room_owner o ON o.room_id=r.id WHERE lower(r.code)=lower($1) ORDER BY (o.unit_id=$2) DESC NULLS LAST LIMIT 1`, [x.fixed_room.trim(), unitId]))[0];
         if (!room) throw new Error(`ruang ${x.fixed_room} tidak ditemukan`);
       }
+      // Program studi per baris (kolom K); kosong = ikut pilihan impor (bisa tingkat unit)
+      let rowSub = subUnitId;
+      if (x.sub_unit) {
+        const sb = (await q(`SELECT id FROM sub_units WHERE unit_id=$1 AND (lower(code)=lower($2) OR lower(name)=lower($2))`, [unitId, x.sub_unit.trim()]))[0];
+        if (!sb) throw new Error(`program studi "${x.sub_unit}" tidak ada pada unit ini`);
+        if (guardSub && sb.id !== guardSub) throw new Error(`program studi "${x.sub_unit}" bukan sub unit Anda`);
+        rowSub = sb.id;
+      }
       const dur = Number(x.duration_slots) || course.credits || 2;
-      const r = await q(`INSERT INTO course_classes (period_id,unit_id,course_id,class_name,student_group,lecturer_id,student_count,duration_slots,sessions_per_week,required_category_id,fixed_room_id,note)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      const r = await q(`INSERT INTO course_classes (period_id,unit_id,course_id,class_name,student_group,lecturer_id,student_count,duration_slots,sessions_per_week,required_category_id,fixed_room_id,note,sub_unit_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         ON CONFLICT (period_id,course_id,class_name) DO UPDATE SET student_group=EXCLUDED.student_group, lecturer_id=EXCLUDED.lecturer_id, student_count=EXCLUDED.student_count,
           duration_slots=EXCLUDED.duration_slots, sessions_per_week=EXCLUDED.sessions_per_week, required_category_id=EXCLUDED.required_category_id,
-          fixed_room_id=EXCLUDED.fixed_room_id, note=EXCLUDED.note RETURNING (xmax = 0) inserted`,
+          fixed_room_id=EXCLUDED.fixed_room_id, note=EXCLUDED.note, sub_unit_id=EXCLUDED.sub_unit_id
+          WHERE course_classes.unit_id=EXCLUDED.unit_id AND ($14::int IS NULL OR course_classes.sub_unit_id=$14) RETURNING (xmax = 0) inserted`,
       [periodId, unitId, course.id, (x.class_name || 'A').trim(), x.student_group || null, lect && lect.id, Number(x.student_count) || 30, dur,
-        Number(x.sessions_per_week) || 1, catId(x.category, 'Kelas'), room && room.id, x.note || null]);
+        Number(x.sessions_per_week) || 1, catId(x.category, 'Kelas'), room && room.id, x.note || null, rowSub, guardSub]);
+      if (!r.length) throw new Error('kelas ini sudah ada dan dimiliki unit/sub unit lain');
       r[0].inserted ? S.kelas.created++ : S.kelas.updated++;
       if (S.preview.length < 8) S.preview.push({ row: x._row, course: `${x.course_code} ${course.name}`, class_name: x.class_name || 'A', group: x.student_group || '', lecturer: x.lecturer || '', size: Number(x.student_count) || 30, dur });
     });
