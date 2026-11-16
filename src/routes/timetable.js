@@ -167,8 +167,9 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const { period_id, unit_id, room_scope = { mode: 'owned' }, constraints = [], params = {} } = req.body;
   const sub = await resolveSub(req.user, unit_id, req.body.sub_unit_id);   // null = seluruh unit (semua prodi + kelas tingkat unit)
   unitGuard(req.user, unit_id, sub);
-  const running = await db.one(`SELECT id FROM timetable_runs WHERE unit_id=$1 AND status='running' AND ($2::int IS NULL OR sub_unit_id IS NULL OR sub_unit_id=$2)`, [unit_id, sub]);
-  if (running) fail(409, 'Masih ada proses penjadwalan yang berjalan untuk unit/sub unit ini');
+  // Satu unit hanya boleh punya satu proses berjalan: prodi dijadwalkan satu per satu agar hasil prodi sebelumnya bisa dihindari
+  const running = await db.one(`SELECT id FROM timetable_runs WHERE unit_id=$1 AND status='running'`, [unit_id]);
+  if (running) fail(409, 'Masih ada proses penjadwalan yang berjalan untuk unit ini. Tunggu selesai (atau hentikan) sebelum menjalankan prodi berikutnya.');
   const period = await db.one('SELECT * FROM academic_periods WHERE id=$1', [period_id]);
   if (!period) fail(400, 'Periode tidak ditemukan');
   const classes = await db.q(`${CLASS_SQL} WHERE cc.period_id=$1 AND cc.unit_id=$2 AND ($3::int IS NULL OR cc.sub_unit_id=$3)`, [period_id, unit_id, sub]);
@@ -196,6 +197,30 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const lecBlocked = [];
   for (const e of lecEv) slots.forEach((s, i) => { if (s.start_time < e.et && s.end_time > e.st) lecBlocked.push({ lecturer_id: e.lecturer_id, day: e.dow, slot_index: i }); });
 
+  // Hasil sementara (status 'done', belum dipublikasikan) pada periode yang sama dianggap sudah terpakai: ruang dan jam dosennya dihindari.
+  // Aturannya per KELAS: untuk tiap kelas yang berlaku adalah penempatan dari proses terbaru, dan kelas yang sedang dijadwalkan proses ini
+  // (akan digantikan) tidak dihitung. Jadi hasil seluruh-unit yang lebih baru menggugurkan hasil prodi yang lebih lama, dan sebaliknya.
+  const prior = await db.q(`SELECT t.id, t.unit_id, su.name sub_unit_name, t.result->'assignments' assignments
+    FROM timetable_runs t LEFT JOIN sub_units su ON su.id=t.sub_unit_id
+    WHERE t.period_id=$1 AND t.status='done' AND t.result IS NOT NULL ORDER BY t.created_at, t.id`, [period_id]);
+  const mine = new Set(classes.map(c => Number(c.id))), newest = new Map();
+  for (const pr of prior) for (const a of pr.assignments || []) newest.set(Number(a.class_id), pr.id);
+  const avoidRuns = [], roomSet = new Set(rooms.map(x => Number(x.id))), lecSet = new Set(lecIds.map(Number));
+  const overlapIdx = (st, et) => slots.map((s, i) => (s.start_time < et && s.end_time > st ? i : -1)).filter(i => i >= 0);
+  for (const pr of prior) {
+    const list = (pr.assignments || []).filter(a => newest.get(Number(a.class_id)) === pr.id && !mine.has(Number(a.class_id)));
+    if (!list.length) continue;
+    let used = 0;
+    for (const a of list) {
+      const idxs = overlapIdx(a.start_time, a.end_time); if (!idxs.length) continue;
+      let hit = false;
+      if (roomSet.has(Number(a.room_id))) { idxs.forEach(i => blocked.push({ room_id: Number(a.room_id), day: a.day, slot_index: i })); hit = true; }
+      if (a.lecturer_id && lecSet.has(Number(a.lecturer_id))) { idxs.forEach(i => lecBlocked.push({ lecturer_id: Number(a.lecturer_id), day: a.day, slot_index: i })); hit = true; }
+      if (hit) used++;
+    }
+    avoidRuns.push({ id: pr.id, unit_id: pr.unit_id, sub_unit_name: pr.sub_unit_name || 'Seluruh unit', sessions: list.length, relevant: used });
+  }
+
   const problem = {
     days, slots, rooms, blocked, lecBlocked, constraints,
     params: pick(params, ['population', 'generations', 'time_limit_ms', 'stagnation']),
@@ -206,7 +231,7 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
     })),
   };
   const run = await db.one(`INSERT INTO timetable_runs (period_id,unit_id,sub_unit_id,params,room_scope,constraints,created_by) VALUES ($1,$2,$7,$3,$4,$5,$6) RETURNING *`,
-    [period_id, unit_id, JSON.stringify({ ...params, days }), JSON.stringify(room_scope), JSON.stringify(constraints), req.user.id, sub]);
+    [period_id, unit_id, JSON.stringify({ ...params, days, avoid_runs: avoidRuns }), JSON.stringify(room_scope), JSON.stringify(constraints), req.user.id, sub]);
 
   const w = new Worker(path.join(__dirname, '../services/ga-worker.js'), { workerData: problem });
   workers.set(run.id, w);

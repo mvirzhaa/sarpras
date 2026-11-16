@@ -181,7 +181,8 @@ async function ttConstraints(body, { period, unit, sub, subs, slots, cats }) {
       <div class="panel" style="margin-top:18px"><div class="panel-head"><h3>Kendala khusus</h3><div class="actions"><select id="addCon" style="width:auto"><option value="">+ Tambah kendala…</option>${Object.entries(CON_TYPES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}</select></div></div>
         <div class="panel-body">${cfg.constraints.map(conCard).join('') || '<div class="empty">Tanpa kendala khusus: algoritma hanya mencegah bentrok ruang, dosen, dan rombel.</div>'}
         <p class="muted" style="font-size:13px;margin-top:12px">Kendala <b>wajib</b> dipenuhi mutlak (mempersempit pilihan waktu). Kendala lain bersifat preferensi; bobot makin besar makin diprioritaskan. Bentrok ruang, dosen, rombel, dan kapasitas ruang selalu dijaga.</p></div></div>
-      <div class="btn-row" style="margin-top:18px;justify-content:flex-end"><button class="btn primary" id="run">${I('cpu')} Simpan & jalankan penjadwalan</button></div>`;
+      <p class="muted" style="margin-top:18px;font-size:13px">Jadwalkan <b>satu program studi demi satu</b>: hasil sementara prodi lain pada periode ini (yang sudah selesai diproses walau belum dipublikasikan) otomatis dihindari, baik ruang maupun jam mengajar dosennya, sehingga tidak bentrok dengan prodi yang lebih dulu. Menjalankan ulang sebuah prodi menggantikan hasil sementara prodi itu sendiri.</p>
+      <div class="btn-row" style="margin-top:8px;justify-content:flex-end"><button class="btn primary" id="run">${I('cpu')} Simpan & jalankan penjadwalan</button></div>`;
   };
   draw();
   body.oninput = body.onchange = e => {
@@ -235,11 +236,23 @@ async function ttResults(body, { period, unit, sub, slots }, q) {
     const keys = [...new Set(A.map(keyOf))].sort();
     const pick = q.key && keys.includes(q.key) ? q.key : keys[0];
     const confIds = new Set((R.conflicts || []).map(c => c.class_id));
-    const cell = (d, si) => A.map((a, i) => [a, i]).filter(([a]) => keyOf(a) === pick && a.day === d && a.slot_index === si)
-      .map(([a, i]) => `<div class="tt-cell ${confIds.has(a.class_id) ? 'conf' : ''}" data-ai="${i}"><b>${esc(a.course_code)} ${esc(a.class_name)}</b><br>${esc(a.course_name)}<br><small>${esc(view === 'room' ? a.lecturer_name || '' : a.room_code)} · ${esc(a.group || '')} · ${a.start_time}–${a.end_time}</small></div>`).join('');
+    // Satu kelas bisa memakai beberapa sesi berurutan: semua sesi yang dipakai digambar (bukan hanya sesi awal)
+    const spanOf = a => Math.max(1, rs.findIndex(s => s.slot_no === a.slot_end) - a.slot_index + 1);
+    const cell = (d, si) => {
+      const hit = A.map((a, i) => [a, i]).filter(([a]) => keyOf(a) === pick && a.day === d && si >= a.slot_index && si < a.slot_index + spanOf(a));
+      if (!hit.length) return '<td></td>';
+      const conf = hit.some(([a]) => confIds.has(a.class_id)), cont = hit.some(([a]) => si > a.slot_index), more = hit.some(([a]) => si < a.slot_index + spanOf(a) - 1);
+      const html = hit.map(([a, i]) => {
+        const n = spanOf(a), pos = si - a.slot_index;
+        if (pos > 0) return `<div class="tt-cell tt-next" data-ai="${i}"><small>↳ ${esc(a.course_code)} ${esc(a.class_name)} · lanjutan (${pos + 1}/${n})</small></div>`;
+        return `<div class="tt-cell ${confIds.has(a.class_id) ? 'conf' : ''}" data-ai="${i}"><b>${esc(a.course_code)} ${esc(a.class_name)}</b><br>${esc(a.course_name)}<br><small>${esc(view === 'room' ? a.lecturer_name || '' : a.room_code)} · ${esc(a.group || '')} · ${a.start_time}–${a.end_time}${n > 1 ? ` · ${n} sesi` : ''}</small></div>`;
+      }).join('');
+      return `<td class="tt-on${conf ? ' conf' : ''}${cont ? ' cont' : ''}${more ? ' more' : ''}">${html}</td>`;
+    };
     rb.innerHTML = `<div class="stats"><div class="stat"><b>${R.hard}</b><span>Bentrok keras</span></div><div class="stat"><b>${fmt.num(R.soft, 1)}</b><span>Penalti preferensi</span></div>
         <div class="stat"><b>${A.length}</b><span>Sesi terjadwal</span></div><div class="stat"><b>${fmt.num(R.generations)}</b><span>Generasi</span></div><div class="stat"><b>${fmt.num(R.ms / 1000, 1)} dtk</b><span>Waktu proses</span></div></div>
       ${R.hard ? `<div class="form-error">${R.hard} bentrok tersisa: ${(R.conflicts || []).slice(0, 8).map(c => `${esc(c.label)} (${c.reasons.join(', ')})`).join('; ')}. Tambah ruang/hari, longgarkan kendala wajib, atau ubah manual.</div>` : ''}
+      ${((run.params || {}).avoid_runs || []).length ? `<p class="muted" style="margin:0 0 12px;font-size:13px">Proses ini menghindari ruang & jam dosen pada hasil sementara: ${run.params.avoid_runs.map(x => `<b>#${x.id} ${esc(x.sub_unit_name)}</b> (${x.sessions} sesi)`).join(', ')}. Bila ada bentrok tersisa dengan hasil tersebut, alasannya tertulis pada daftar bentrok di atas.</p>` : ''}
       ${R.warnings && R.warnings.length ? `<details style="margin-bottom:12px"><summary class="muted">${R.warnings.length} catatan</summary><ul>${R.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
       <div class="filters"><select id="by"><option value="room" ${view === 'room' ? 'selected' : ''}>Per ruang</option><option value="lecturer" ${view === 'lecturer' ? 'selected' : ''}>Per dosen</option><option value="group" ${view === 'group' ? 'selected' : ''}>Per rombel</option></select>
         <select id="key">${keys.map(k => `<option ${k === pick ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
@@ -247,7 +260,7 @@ async function ttResults(body, { period, unit, sub, slots }, q) {
         ${run.status === 'published' ? `<span class="badge ok">Dipublikasikan ${fmt.dt(run.published_at)}</span><button class="btn sm" id="pub">Publikasikan ulang</button>` : `<button class="btn primary sm" id="pub">${I('check')} Publikasikan ke jadwal</button>`}
         <button class="btn sm danger" id="delRun">Hapus</button></span></div>
       <div class="table-wrap"><table class="tt-grid"><thead><tr><th>Sesi</th>${days.map(d => `<th>${ISO_DAY[d]}</th>`).join('')}</tr></thead><tbody>
-        ${rs.map((s, si) => `<tr><th style="white-space:nowrap">${s.slot_no}<br><small>${s.start_time}</small></th>${days.map(d => `<td>${cell(d, si)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+        ${rs.map((s, si) => `<tr><th style="white-space:nowrap">${s.slot_no}<br><small>${s.start_time}</small></th>${days.map(d => cell(d, si)).join('')}</tr>`).join('')}</tbody></table></div>
       <p class="muted" style="font-size:13px;margin-top:8px">Klik kartu kelas untuk memindahkan secara manual sebelum dipublikasikan.</p>`;
     $('#by').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: runId, by: e.target.value });
     $('#key').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: runId, by: view, key: e.target.value });
