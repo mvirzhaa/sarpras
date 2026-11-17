@@ -175,3 +175,12 @@ test/ga.test.js          uji algoritma
 - Integrasi SSO/eportal kampus dan sinkronisasi data dosen, mata kuliah, serta rombel dari SIAKAD (saat ini lewat input/impor CSV).
 - Token untuk unduhan berkas dikirim lewat query string agar tag `<img>`/tautan dapat diakses; untuk keamanan lebih ketat, ganti dengan cookie HttpOnly atau URL bertanda tangan berumur pendek.
 - Rate limiter portal publik berbasis memori; gunakan Redis bila menjalankan lebih dari satu instans.
+
+## Pembaruan: bentrok, drag & drop, rombel, aset per ruang
+- **Bentrok** ditampilkan sebagai tabel per penyebab (ruang, dosen, rombel, ruang terpakai kegiatan lain, dosen mengajar di jadwal lain) dan dapat diekspor ke Excel (`GET /api/tt/runs/:id/conflicts.xlsx`).
+- **Edit manual jadwal** dengan seret-lepas ke posisi kosong; server menolak (409) bila dosen/ruang/rombel terpakai dan menyebut penyebabnya.
+- **Pemilihan rombel** setelah memilih prodi; setiap rombel dijadwalkan sendiri (`timetable_runs.student_group`). Terbitkan jadwal satu rombel sebelum menjalankan rombel berikutnya agar yang berikutnya menghindari jadwal yang sudah terbit.
+- Warna default dinding `#6799FE`, atap `#6788CB`.
+- **Aset per ruang** (Denah → Aset, kondisi & KIR ruang): daftarkan aset baru, tambah dari daftar aset (mutasi), ubah data, pindah ruang, hapus (berita acara penghapusan), ubah kondisi, dan cetak **Kartu Inventaris Ruangan (KIR)**.
+- **Contoh aset tetap**: `npm run db:init` menambah kode Meja Dosen, Kursi Belajar, Papan Tulis, Proyektor (Infokus), AC Split; `npm run db:aset` mengisi tiap Ruang Kelas dengan aset contoh tersebut (aman diulang).
+- Setelah memperbarui kode jalankan `npm run db:init` (kolom & kode baru) atau restart server (migrasi otomatis).

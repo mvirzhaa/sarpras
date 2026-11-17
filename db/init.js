@@ -36,6 +36,9 @@ const CODES = [
   ['3.05.01', 'Alat Kantor'], ['3.05.02', 'Alat Rumah Tangga'],
   ['3.05.02.01', 'Mebel'],
   ['3.05.02.01.001', 'Meja Kerja (contoh)'], ['3.05.02.01.002', 'Kursi Kerja (contoh)'], ['3.05.02.01.003', 'Lemari (contoh)'],
+  ['3.05.02.01.004', 'Meja Dosen'], ['3.05.02.01.005', 'Kursi Belajar (Kuliah)'], ['3.05.02.01.006', 'Papan Tulis (Whiteboard)'],
+  ['3.05.02.02', 'Alat Pendingin'], ['3.05.02.02.001', 'AC Split'],
+  ['3.10.02', 'Peralatan Komputer'], ['3.10.02.03', 'Peralatan Periferal'], ['3.10.02.03.001', 'Proyektor (Infokus)'],
   ['3.10', 'Komputer'], ['3.10.01', 'Komputer Unit'], ['3.10.01.02', 'Personal Computer'],
   ['3.10.01.02.001', 'P.C Unit'], ['3.10.01.02.002', 'Lap Top'], ['3.10.01.02.003', 'Note Book'],
 ];
@@ -64,6 +67,8 @@ async function main() {
     await pool.query(`INSERT INTO asset_codes (code,name,level,parent_id) VALUES ($1,$2,$3,$4) ON CONFLICT (code) DO NOTHING`,
       [code, name, parts.length, parent ? parent.id : null]);
   }
+  const LIFE = { '3.05.02.01.004': 8, '3.05.02.01.005': 8, '3.05.02.01.006': 8, '3.05.02.02.001': 8, '3.10.02.03.001': 4 };
+  for (const [code, yrs] of Object.entries(LIFE)) await pool.query('UPDATE asset_codes SET useful_life_years=$2 WHERE code=$1 AND useful_life_years IS NULL', [code, yrs]);
   const defaults = {
     org: { name: 'Universitas Ibn Khaldun Bogor', short: 'UIKA', unit_label: 'Biro Sarana dan Prasarana', city: 'Bogor' },
     operational: { days: [1, 2, 3, 4, 5, 6], start: '07:00', end: '21:00' },

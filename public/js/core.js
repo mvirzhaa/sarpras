@@ -174,8 +174,8 @@ const UI = {
     }
     return out;
   },
-  formModal({ title, fields, values = {}, submit = 'Simpan', wide, onSubmit, extra = '' }) {
-    const m = UI.modal({ title, wide, body: UI.form(fields, values) + extra,
+  formModal({ title, fields, values = {}, submit = 'Simpan', wide, onSubmit, extra = '', onClose }) {
+    const m = UI.modal({ title, wide, onClose, body: UI.form(fields, values) + extra,
       actions: [{ label: 'Batal' }, { label: submit, kind: 'primary', onClick: async () => onSubmit(UI.read(m.body, fields), m) }] });
     UI.bindPickers(m.body);
     $('form', m.body).addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && !e.target.closest('.picker')) $('.modal-foot .primary', m.el).click(); });

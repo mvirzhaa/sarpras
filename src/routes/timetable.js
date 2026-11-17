@@ -11,6 +11,45 @@ const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 
 const r = express.Router();
 const workers = new Map();
+
+// Peristiwa lain yang tidak digantikan proses ini (jadwal prodi/rombel lain, kegiatan berulang). Param: $4 periode, $5 sub unit, $6 unit, $7 rombel
+const KEEP_SQL = `(e.series_id IS NOT NULL OR e.tt_run_id IS NOT NULL)
+      AND ( ($7::text IS NOT NULL AND (e.tt_class_id IS NULL OR e.tt_class_id NOT IN (SELECT id FROM course_classes WHERE student_group=$7 AND period_id=$4 AND unit_id=$6 AND ($5::int IS NULL OR sub_unit_id=$5))))
+         OR ($7::text IS NULL AND (
+              ($5::int IS NULL AND (e.tt_run_id IS NULL OR e.tt_run_id NOT IN (SELECT id FROM timetable_runs WHERE period_id=$4 AND unit_id=$6)))
+           OR ($5::int IS NOT NULL AND (e.tt_class_id IS NULL OR e.tt_class_id NOT IN (SELECT id FROM course_classes WHERE sub_unit_id=$5 AND period_id=$4))) )) )`;
+const DAYS = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+const CAUSES = [['ruang', 'Bentrok ruang'], ['dosen', 'Bentrok dosen'], ['rombel', 'Bentrok rombel'], ['ruang_luar', 'Ruang dipakai kegiatan/jadwal lain'], ['dosen_luar', 'Dosen mengajar di jadwal lain']];
+const toMin = x => { const [a, b] = String(x).split(':').map(Number); return a * 60 + b; };
+const overlap = (a, b) => a.day === Number(b.dow ?? b.day) && toMin(a.start_time) < toMin(b.et ?? b.end_time) && toMin(b.st ?? b.start_time) < toMin(a.end_time);
+const descA = a => `${a.course_code} ${a.course_name} (${a.class_name}${a.group ? ' · ' + a.group : ''})`;
+async function externalEvents(run, period, assignments, only) {
+  const roomIds = [...new Set((only ? only.rooms : assignments.map(a => a.room_id)).filter(Boolean))], lecIds = [...new Set((only ? only.lecs : assignments.map(a => a.lecturer_id)).filter(Boolean))];
+  if (!roomIds.length && !lecIds.length) return [];
+  return db.q(`SELECT e.id, e.title, e.room_id, e.lecturer_id, rm.code room_code, extract(isodow FROM e.start_at)::int dow, to_char(e.start_at,'HH24:MI') st, to_char(e.end_at,'HH24:MI') et
+    FROM events e JOIN rooms rm ON rm.id=e.room_id WHERE e.status='confirmed' AND (e.room_id = ANY($1) OR e.lecturer_id = ANY($8)) AND e.start_at < $3::date + 1 AND e.end_at > $2::date AND ${KEEP_SQL}
+    GROUP BY e.id, rm.code`, [roomIds, period.start_date, period.end_date, run.period_id, run.sub_unit_id ?? null, run.unit_id, run.student_group ?? null, lecIds]);
+}
+// Daftar bentrok keras per penyebab: satu baris per (penyebab, mata kuliah)
+function analyze(A, ext) {
+  const rows = [];
+  const push = (cause, a, withs) => rows.push({ cause, class_id: a.class_id, session: a.session, course_code: a.course_code, course_name: a.course_name, class_name: a.class_name, group: a.group || '',
+    lecturer_name: a.lecturer_name || '', day: a.day, start_time: a.start_time, end_time: a.end_time, room_code: a.room_code, with: withs });
+  A.forEach((a, i) => {
+    const key = { ruang: x => x.room_id, dosen: x => x.lecturer_id, rombel: x => x.group };
+    for (const c of ['ruang', 'dosen', 'rombel']) {
+      const k = key[c](a); if (k === null || k === undefined || k === '') continue;
+      const o = A.filter((b, j) => j !== i && key[c](b) === k && overlap(a, b));
+      if (o.length) push(c, a, o.map(b => `${descA(b)} · ${DAYS[b.day]} ${b.start_time}–${b.end_time}${c === 'ruang' ? '' : ' · ' + b.room_code}`));
+    }
+    const eo = (ext || []).filter(e => overlap(a, e));
+    const rl = eo.filter(e => e.room_id === a.room_id), dl = eo.filter(e => a.lecturer_id && e.lecturer_id === a.lecturer_id);
+    if (rl.length) push('ruang_luar', a, rl.map(e => `${e.title} · ${e.room_code} ${e.st}–${e.et}`));
+    if (dl.length) push('dosen_luar', a, dl.map(e => `${e.title} · ${e.room_code} ${e.st}–${e.et}`));
+  });
+  const ord = Object.fromEntries(CAUSES.map(([k], i) => [k, i]));
+  return rows.sort((x, y) => ord[x.cause] - ord[y.cause] || x.day - y.day || toMin(x.start_time) - toMin(y.start_time) || x.course_code.localeCompare(y.course_code));
+}
 // Hak: Super Admin semua; admin unit (fakultas) seluruh unit & sub unitnya; admin sub unit (prodi) hanya sub unitnya
 const unitGuard = (user, unitId, subId) => assertUnitData(user, unitId, subId == null ? null : subId);
 // Sub unit target (null = tingkat unit / seluruh fakultas); admin prodi selalu dipaksa ke sub unitnya
@@ -38,7 +77,7 @@ r.get('/tt/classes', ah(async (req, res) => {
   if (!req.query.period_id || !req.query.unit_id) fail(400, 'Pilih periode dan unit');
   const p = [req.query.period_id, req.query.unit_id];
   if (req.user.role === 'unit_admin' && Number(req.query.unit_id) !== Number(req.user.unit_id)) fail(403, 'Hanya dapat melihat data unit sendiri');
-  const w = subFilter(req.user, req.query.sub_unit_id, p, 'cc.sub_unit_id');
+  const w = subFilter(req.user, req.query.sub_unit_id, p, 'cc.sub_unit_id') + (req.query.student_group ? (p.push(req.query.student_group), ` AND cc.student_group=$${p.length}`) : '');
   res.json(await db.q(`${CLASS_SQL} WHERE cc.period_id=$1 AND cc.unit_id=$2 AND ${w} ORDER BY su.name NULLS FIRST, c.semester_level NULLS LAST, c.code, cc.class_name`, p));
 }));
 r.post('/tt/classes', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
@@ -147,12 +186,23 @@ async function scopedRooms(user, unitId, scope) {
     LEFT JOIN v_room_owner o ON o.room_id=r.id WHERE ${w.join(' AND ')} AND ($1::int IS NOT NULL) ORDER BY r.capacity`, p);
 }
 
+// Daftar rombel (kelompok mahasiswa) pada periode/unit/sub unit, untuk memilih satu rombel saat menjadwalkan
+r.get('/tt/groups', ah(async (req, res) => {
+  if (!req.query.period_id || !req.query.unit_id) fail(400, 'Pilih periode dan unit');
+  if (req.user.role === 'unit_admin' && Number(req.query.unit_id) !== Number(req.user.unit_id)) fail(403, 'Hanya dapat melihat data unit sendiri');
+  const p = [req.query.period_id, req.query.unit_id], w = subFilter(req.user, req.query.sub_unit_id, p, 'cc.sub_unit_id');
+  const rows = await db.q(`SELECT cc.student_group "group", count(*)::int n_classes, COALESCE(sum(cc.duration_slots*cc.sessions_per_week),0)::int n_sessions, max(cc.sub_unit_id) sub_unit_id,
+      count(*) FILTER (WHERE EXISTS (SELECT 1 FROM events e WHERE e.tt_class_id=cc.id))::int n_published
+    FROM course_classes cc WHERE cc.period_id=$1 AND cc.unit_id=$2 AND ${w} AND COALESCE(cc.student_group,'')<>'' GROUP BY cc.student_group ORDER BY cc.student_group`, p);
+  res.json(rows);
+}));
 r.get('/tt/runs', ah(async (req, res) => {
   const p = [], w = ['TRUE'];
   if (req.query.period_id) { p.push(req.query.period_id); w.push(`t.period_id=$${p.length}`); }
   if (req.query.unit_id) { p.push(req.query.unit_id); w.push(`t.unit_id=$${p.length}`); }
   w.push(subFilter(req.user, req.query.sub_unit_id, p, 't.sub_unit_id'));
-  res.json(await db.q(`SELECT t.id,t.period_id,t.unit_id,t.sub_unit_id,su.name sub_unit_name,t.status,t.progress,t.hard_violations,t.soft_penalty,t.created_at,t.finished_at,t.published_at,
+  if (req.query.student_group) { p.push(req.query.student_group); w.push(`t.student_group=$${p.length}`); }
+  res.json(await db.q(`SELECT t.id,t.period_id,t.unit_id,t.sub_unit_id,t.student_group,su.name sub_unit_name,t.status,t.progress,t.hard_violations,t.soft_penalty,t.created_at,t.finished_at,t.published_at,
     t.params, t.room_scope, u.name unit_name, us.name created_by_name, jsonb_array_length(COALESCE(t.result->'assignments','[]')) n_assign
     FROM timetable_runs t JOIN units u ON u.id=t.unit_id LEFT JOIN sub_units su ON su.id=t.sub_unit_id LEFT JOIN users us ON us.id=t.created_by WHERE ${w.join(' AND ')} ORDER BY t.created_at DESC LIMIT 50`, p));
 }));
@@ -166,14 +216,14 @@ r.get('/tt/runs/:id', ah(async (req, res) => {
 r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const { period_id, unit_id, room_scope = { mode: 'owned' }, constraints = [], params = {} } = req.body;
   const sub = await resolveSub(req.user, unit_id, req.body.sub_unit_id);   // null = seluruh unit (semua prodi + kelas tingkat unit)
+  const grp = String(req.body.student_group || '').trim() || null;           // diisi = hanya satu rombel
   unitGuard(req.user, unit_id, sub);
-  // Satu unit hanya boleh punya satu proses berjalan: prodi dijadwalkan satu per satu agar hasil prodi sebelumnya bisa dihindari
-  const running = await db.one(`SELECT id FROM timetable_runs WHERE unit_id=$1 AND status='running'`, [unit_id]);
-  if (running) fail(409, 'Masih ada proses penjadwalan yang berjalan untuk unit ini. Tunggu selesai (atau hentikan) sebelum menjalankan prodi berikutnya.');
+  const running = await db.one(`SELECT id FROM timetable_runs WHERE unit_id=$1 AND status='running' AND ($2::int IS NULL OR sub_unit_id IS NULL OR sub_unit_id=$2)`, [unit_id, sub]);
+  if (running) fail(409, 'Masih ada proses penjadwalan yang berjalan untuk unit/sub unit ini');
   const period = await db.one('SELECT * FROM academic_periods WHERE id=$1', [period_id]);
   if (!period) fail(400, 'Periode tidak ditemukan');
-  const classes = await db.q(`${CLASS_SQL} WHERE cc.period_id=$1 AND cc.unit_id=$2 AND ($3::int IS NULL OR cc.sub_unit_id=$3)`, [period_id, unit_id, sub]);
-  if (!classes.length) fail(400, sub ? 'Belum ada data kelas untuk sub unit ini pada periode ini' : 'Belum ada data kelas pada periode ini');
+  const classes = await db.q(`${CLASS_SQL} WHERE cc.period_id=$1 AND cc.unit_id=$2 AND ($3::int IS NULL OR cc.sub_unit_id=$3) AND ($4::text IS NULL OR cc.student_group=$4)`, [period_id, unit_id, sub, grp]);
+  if (!classes.length) fail(400, grp ? `Belum ada kelas untuk rombel ${grp} pada periode ini` : sub ? 'Belum ada data kelas untuk sub unit ini pada periode ini' : 'Belum ada data kelas pada periode ini');
   const rooms = await scopedRooms(req.user, unit_id, room_scope);
   if (!rooms.length) fail(400, 'Tidak ada ruangan aktif dalam cakupan yang dipilih');
   let slots = await db.q(`SELECT slot_no, to_char(start_time,'HH24:MI') start_time, to_char(end_time,'HH24:MI') end_time FROM time_slots ORDER BY slot_no`);
@@ -181,45 +231,19 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const days = (params.days && params.days.length ? params.days : [1, 2, 3, 4, 5, 6]).map(Number);
   // Jadwal berulang lain (unit lain / event rutin) di ruang yang sama = slot terblokir
   // Event yang akan DIGANTI proses ini tidak memblokir: seluruh unit -> semua hasil proses unit pada periode ini; per sub unit -> hanya kelas sub unit itu
-  const keep = `(e.series_id IS NOT NULL OR e.tt_run_id IS NOT NULL)
-      AND ( ($5::int IS NULL AND (e.tt_run_id IS NULL OR e.tt_run_id NOT IN (SELECT id FROM timetable_runs WHERE period_id=$4 AND unit_id=$6)))
-         OR ($5::int IS NOT NULL AND (e.tt_class_id IS NULL OR e.tt_class_id NOT IN (SELECT id FROM course_classes WHERE sub_unit_id=$5 AND period_id=$4))) )`;
+  const keep = KEEP_SQL;
   const ev = await db.q(`SELECT DISTINCT e.room_id, extract(isodow FROM e.start_at)::int dow, to_char(e.start_at,'HH24:MI') st, to_char(e.end_at,'HH24:MI') et
     FROM events e WHERE e.status='confirmed' AND e.room_id = ANY($1) AND e.start_at < $3::date + 1 AND e.end_at > $2::date AND ${keep}`,
-  [rooms.map(x => x.id), period.start_date, period.end_date, period_id, sub, unit_id]);
+  [rooms.map(x => x.id), period.start_date, period.end_date, period_id, sub, unit_id, grp]);
   const blocked = [];
   for (const e of ev) slots.forEach((s, i) => { if (s.start_time < e.et && s.end_time > e.st) blocked.push({ room_id: e.room_id, day: e.dow, slot_index: i }); });
   // Dosen yang sudah mengajar di jadwal lain (mis. prodi lain / unit lain) tidak boleh dijadwalkan bersamaan
   const lecIds = [...new Set(classes.map(c => c.lecturer_id).filter(Boolean))];
   const lecEv = lecIds.length ? await db.q(`SELECT DISTINCT e.lecturer_id, extract(isodow FROM e.start_at)::int dow, to_char(e.start_at,'HH24:MI') st, to_char(e.end_at,'HH24:MI') et
     FROM events e WHERE e.status='confirmed' AND e.lecturer_id = ANY($1) AND e.start_at < $3::date + 1 AND e.end_at > $2::date AND ${keep}`,
-  [lecIds, period.start_date, period.end_date, period_id, sub, unit_id]) : [];
+  [lecIds, period.start_date, period.end_date, period_id, sub, unit_id, grp]) : [];
   const lecBlocked = [];
   for (const e of lecEv) slots.forEach((s, i) => { if (s.start_time < e.et && s.end_time > e.st) lecBlocked.push({ lecturer_id: e.lecturer_id, day: e.dow, slot_index: i }); });
-
-  // Hasil sementara (status 'done', belum dipublikasikan) pada periode yang sama dianggap sudah terpakai: ruang dan jam dosennya dihindari.
-  // Aturannya per KELAS: untuk tiap kelas yang berlaku adalah penempatan dari proses terbaru, dan kelas yang sedang dijadwalkan proses ini
-  // (akan digantikan) tidak dihitung. Jadi hasil seluruh-unit yang lebih baru menggugurkan hasil prodi yang lebih lama, dan sebaliknya.
-  const prior = await db.q(`SELECT t.id, t.unit_id, su.name sub_unit_name, t.result->'assignments' assignments
-    FROM timetable_runs t LEFT JOIN sub_units su ON su.id=t.sub_unit_id
-    WHERE t.period_id=$1 AND t.status='done' AND t.result IS NOT NULL ORDER BY t.created_at, t.id`, [period_id]);
-  const mine = new Set(classes.map(c => Number(c.id))), newest = new Map();
-  for (const pr of prior) for (const a of pr.assignments || []) newest.set(Number(a.class_id), pr.id);
-  const avoidRuns = [], roomSet = new Set(rooms.map(x => Number(x.id))), lecSet = new Set(lecIds.map(Number));
-  const overlapIdx = (st, et) => slots.map((s, i) => (s.start_time < et && s.end_time > st ? i : -1)).filter(i => i >= 0);
-  for (const pr of prior) {
-    const list = (pr.assignments || []).filter(a => newest.get(Number(a.class_id)) === pr.id && !mine.has(Number(a.class_id)));
-    if (!list.length) continue;
-    let used = 0;
-    for (const a of list) {
-      const idxs = overlapIdx(a.start_time, a.end_time); if (!idxs.length) continue;
-      let hit = false;
-      if (roomSet.has(Number(a.room_id))) { idxs.forEach(i => blocked.push({ room_id: Number(a.room_id), day: a.day, slot_index: i })); hit = true; }
-      if (a.lecturer_id && lecSet.has(Number(a.lecturer_id))) { idxs.forEach(i => lecBlocked.push({ lecturer_id: Number(a.lecturer_id), day: a.day, slot_index: i })); hit = true; }
-      if (hit) used++;
-    }
-    avoidRuns.push({ id: pr.id, unit_id: pr.unit_id, sub_unit_name: pr.sub_unit_name || 'Seluruh unit', sessions: list.length, relevant: used });
-  }
 
   const problem = {
     days, slots, rooms, blocked, lecBlocked, constraints,
@@ -230,8 +254,8 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
       category_id: c.required_category_id, fixed_room_id: c.fixed_room_id,
     })),
   };
-  const run = await db.one(`INSERT INTO timetable_runs (period_id,unit_id,sub_unit_id,params,room_scope,constraints,created_by) VALUES ($1,$2,$7,$3,$4,$5,$6) RETURNING *`,
-    [period_id, unit_id, JSON.stringify({ ...params, days, avoid_runs: avoidRuns }), JSON.stringify(room_scope), JSON.stringify(constraints), req.user.id, sub]);
+  const run = await db.one(`INSERT INTO timetable_runs (period_id,unit_id,sub_unit_id,params,room_scope,constraints,created_by,student_group) VALUES ($1,$2,$7,$3,$4,$5,$6,$8) RETURNING *`,
+    [period_id, unit_id, JSON.stringify({ ...params, days }), JSON.stringify(room_scope), JSON.stringify(constraints), req.user.id, sub, grp]);
 
   const w = new Worker(path.join(__dirname, '../services/ga-worker.js'), { workerData: problem });
   workers.set(run.id, w);
@@ -250,6 +274,11 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
             lecturer_name: c.lecturer_name, group: c.student_group, size: c.student_count, room_code: rm.code, room_name: rm.name, capacity: rm.capacity };
         });
         res2.slots = slots; res2.days = days; res2.rooms = rooms;
+        try {   // daftar bentrok rinci per penyebab (termasuk bentrok dengan jadwal/kegiatan lain di luar proses ini)
+          const rows = analyze(res2.assignments, await externalEvents(run, period, res2.assignments));
+          res2.hard_ga = res2.hard; res2.hard = rows.length;
+        } catch (e) { console.error('analisis bentrok', e); }
+        res2.conflicts = [];
         await db.query(`UPDATE timetable_runs SET status='done', progress=100, hard_violations=$2, soft_penalty=$3, result=$4, finished_at=now(),
           log=$5 WHERE id=$1`, [run.id, res2.hard, res2.soft, JSON.stringify(res2), `${res2.generations} generasi, ${res2.ms} ms, ${res2.genes} sesi`]);
         await notifyUnit(null, unit_id, 'Penjadwalan otomatis selesai', `Pelanggaran keras: ${res2.hard}`, '#/penjadwalan');
@@ -261,7 +290,7 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
     } catch (e) { console.error('GA message error', e); }
   });
   w.on('error', async e => { await db.query(`UPDATE timetable_runs SET status='failed', log=$2 WHERE id=$1`, [run.id, e.message]); workers.delete(run.id); });
-  await audit(null, req.user, 'run', 'timetable_runs', run.id, { classes: classes.length, rooms: rooms.length, sub_unit_id: sub });
+  await audit(null, req.user, 'run', 'timetable_runs', run.id, { classes: classes.length, rooms: rooms.length, sub_unit_id: sub, student_group: grp });
   res.status(201).json(run);
 }));
 
@@ -274,34 +303,73 @@ r.post('/tt/runs/:id/cancel', roles('superadmin', 'unit_admin'), ah(async (req, 
   res.json({ ok: true });
 }));
 
-// Edit manual satu penempatan sebelum dipublikasikan
+// Daftar bentrok rinci per penyebab
+async function loadRunFor(req, id) {
+  const run = await db.one('SELECT * FROM timetable_runs WHERE id=$1', [id]);
+  if (!run) fail(404, 'Proses tidak ditemukan');
+  if (req.user.sub_unit_id && Number(run.sub_unit_id) !== Number(req.user.sub_unit_id)) fail(403, 'Proses ini bukan milik sub unit Anda');
+  if (req.user.role === 'unit_admin' && Number(run.unit_id) !== Number(req.user.unit_id)) fail(403, 'Proses ini bukan milik unit Anda');
+  return run;
+}
+async function runConflicts(run) {
+  const R = run.result; if (!R || !R.assignments) return [];
+  const period = await db.one('SELECT * FROM academic_periods WHERE id=$1', [run.period_id]);
+  return analyze(R.assignments, await externalEvents(run, period, R.assignments));
+}
+r.get('/tt/runs/:id/conflicts', ah(async (req, res) => {
+  const run = await loadRunFor(req, req.params.id), rows = await runConflicts(run);
+  res.json({ total: rows.length, causes: CAUSES.map(([k, l]) => ({ key: k, label: l, count: rows.filter(x => x.cause === k).length })), rows });
+}));
+r.get('/tt/runs/:id/conflicts.xlsx', ah(async (req, res) => {
+  const run = await loadRunFor(req, req.params.id), rows = await runConflicts(run), ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook(); wb.creator = 'SARPRAS';
+  const hdr = ws => { ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF146B4E' } }; ws.views = [{ state: 'frozen', ySplit: 1 }]; };
+  const cols = [['No', 5], ['Penyebab', 30], ['Kode MK', 11], ['Mata kuliah', 36], ['Kelas', 9], ['Rombel', 11], ['Dosen', 30], ['Hari', 9], ['Mulai', 8], ['Selesai', 8], ['Ruang', 10], ['Bentrok dengan', 80]];
+  const fill = (ws, list) => { ws.columns = cols.map(([header, width]) => ({ header, width })); list.forEach((x, i) => ws.addRow([i + 1, (CAUSES.find(c => c[0] === x.cause) || [])[1], x.course_code, x.course_name, x.class_name, x.group, x.lecturer_name, DAYS[x.day], x.start_time, x.end_time, x.room_code, x.with.join('\n')]));
+    ws.eachRow((row, n) => { row.alignment = { vertical: 'top', wrapText: true }; }); hdr(ws); };
+  const sm = wb.addWorksheet('Ringkasan'); sm.columns = [{ header: 'Penyebab bentrok', width: 42 }, { header: 'Jumlah mata kuliah', width: 20 }];
+  CAUSES.forEach(([k, l]) => sm.addRow([l, rows.filter(x => x.cause === k).length])); sm.addRow(['Total baris bentrok', rows.length]); hdr(sm); sm.getRow(sm.rowCount).font = { bold: true };
+  fill(wb.addWorksheet('Semua bentrok'), rows);
+  for (const [k, l] of CAUSES) { const list = rows.filter(x => x.cause === k); if (list.length) fill(wb.addWorksheet(l.replace(/[\\/*?:\[\]]/g, '-').slice(0, 31)), list); }
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="bentrok-penjadwalan-${run.id}.xlsx"`);
+  await wb.xlsx.write(res); res.end();
+}));
+
+// Edit manual satu penempatan sebelum dipublikasikan (seret-lepas). Ditolak bila dosen, ruang, atau rombel sudah terisi di waktu itu.
 r.put('/tt/runs/:id/assignment', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const run = await db.one('SELECT * FROM timetable_runs WHERE id=$1', [req.params.id]);
   if (!run || run.status !== 'done') fail(409, 'Hanya hasil yang belum dipublikasikan yang dapat diedit');
   unitGuard(req.user, run.unit_id, run.sub_unit_id);
-  const { index, day, slot_index, room_id } = req.body;
+  const { index } = req.body, day = Number(req.body.day), slot_index = Number(req.body.slot_index);
   const R = run.result, a = R.assignments[index];
   if (!a) fail(404, 'Penempatan tidak ditemukan');
-  const dur = R.slots.findIndex(s => s.slot_no === a.slot_end) - R.slots.findIndex(s => s.slot_no === a.slot_start) + 1;
-  if (slot_index + dur > R.slots.length) fail(400, 'Durasi melewati sesi terakhir');
-  const rm = R.rooms.find(x => x.id === Number(room_id)) || { id: a.room_id, code: a.room_code, name: a.room_name, capacity: a.capacity };
-  Object.assign(a, { day: Number(day), slot_index, slot_start: R.slots[slot_index].slot_no, slot_end: R.slots[slot_index + dur - 1].slot_no,
-    start_time: R.slots[slot_index].start_time, end_time: R.slots[slot_index + dur - 1].end_time, room_id: rm.id, room_code: rm.code, room_name: rm.name, capacity: rm.capacity, manual: true });
-  // hitung ulang bentrok keras secara sederhana
-  const clash = (x, y) => x.day === y.day && x.slot_index < y.slot_index + (R.slots.findIndex(s => s.slot_no === y.slot_end) - y.slot_index + 1)
-    && y.slot_index < x.slot_index + (R.slots.findIndex(s => s.slot_no === x.slot_end) - x.slot_index + 1);
-  const conflicts = [];
-  R.assignments.forEach((x, i) => R.assignments.forEach((y, j) => {
-    if (j <= i || !clash(x, y)) return;
-    const why = [];
-    if (x.room_id === y.room_id) why.push('bentrok ruang');
-    if (x.lecturer_id && x.lecturer_id === y.lecturer_id) why.push('bentrok dosen');
-    if (x.group && x.group === y.group) why.push('bentrok rombel');
-    if (why.length) conflicts.push({ class_id: x.class_id, label: `${x.course_code} (${x.class_name}) × ${y.course_code} (${y.class_name})`, reasons: why });
-  }));
-  R.conflicts = conflicts; R.hard = conflicts.length;
+  const S = R.slots, i0 = S.findIndex(x => x.slot_no === a.slot_start), i1 = S.findIndex(x => x.slot_no === a.slot_end), dur = i1 - i0 + 1;
+  if (!R.days.includes(day)) fail(400, 'Hari tersebut tidak termasuk hari kuliah pada proses ini');
+  if (!(slot_index >= 0) || slot_index + dur > S.length) fail(409, `Ditolak: kelas ${dur} sesi tidak muat di sini (melewati sesi terakhir)`);
+  const maxGap = Number((run.params || {}).max_gap_min ?? 15);
+  for (let k = slot_index; k < slot_index + dur - 1; k++) { const gap = toMin(S[k + 1].start_time) - toMin(S[k].end_time); if (gap < 0 || gap > maxGap) fail(409, `Ditolak: kelas ${dur} sesi terpotong jeda/istirahat pada ${S[k].end_time}–${S[k + 1].start_time}`); }
+  const rm = req.body.room_id ? R.rooms.find(x => x.id === Number(req.body.room_id)) : { id: a.room_id, code: a.room_code, name: a.room_name, capacity: a.capacity };
+  if (!rm) fail(400, 'Ruang tidak termasuk cakupan proses ini');
+  const cand = { ...a, day, slot_index, start_time: S[slot_index].start_time, end_time: S[slot_index + dur - 1].end_time, room_id: rm.id, room_code: rm.code };
+  const bad = [], at = o => `${DAYS[o.day]} ${o.start_time}–${o.end_time}`;
+  R.assignments.forEach((o, j) => {
+    if (j === index || !overlap(cand, o)) return;
+    if (o.room_id === cand.room_id) bad.push(`ruang ${rm.code} sudah dipakai ${descA(o)} (${at(o)})`);
+    if (cand.lecturer_id && o.lecturer_id === cand.lecturer_id) bad.push(`dosen ${cand.lecturer_name} sudah mengajar ${descA(o)} di ruang ${o.room_code} (${at(o)})`);
+    if (cand.group && o.group === cand.group) bad.push(`rombel ${cand.group} sudah memiliki ${descA(o)} (${at(o)})`);
+  });
+  const period = await db.one('SELECT * FROM academic_periods WHERE id=$1', [run.period_id]);
+  const ext = (await externalEvents(run, period, null, { rooms: [rm.id], lecs: [cand.lecturer_id] })).filter(e => overlap(cand, e));
+  ext.filter(e => e.room_id === rm.id).forEach(e => bad.push(`ruang ${rm.code} dipakai "${e.title}" (${DAYS[e.dow]} ${e.st}–${e.et})`));
+  ext.filter(e => cand.lecturer_id && e.lecturer_id === cand.lecturer_id).forEach(e => bad.push(`dosen ${cand.lecturer_name} mengajar "${e.title}" di ${e.room_code} (${DAYS[e.dow]} ${e.st}–${e.et})`));
+  if (bad.length) fail(409, `Ditolak, posisi ${DAYS[day]} ${cand.start_time}–${cand.end_time} tidak bisa dipakai: ${[...new Set(bad)].join('; ')}.`);
+  Object.assign(a, { day, slot_index, slot_start: S[slot_index].slot_no, slot_end: S[slot_index + dur - 1].slot_no, start_time: cand.start_time, end_time: cand.end_time,
+    room_id: rm.id, room_code: rm.code, room_name: rm.name, capacity: rm.capacity, manual: true });
+  const rows = analyze(R.assignments, await externalEvents(run, period, R.assignments));
+  R.conflicts = []; R.hard = rows.length;
   await db.query('UPDATE timetable_runs SET result=$2, hard_violations=$3 WHERE id=$1', [run.id, JSON.stringify(R), R.hard]);
-  res.json(R);
+  res.json({ hard: R.hard, assignment: a });
 }));
 
 r.post('/tt/runs/:id/publish', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
@@ -315,10 +383,12 @@ r.post('/tt/runs/:id/publish', roles('superadmin', 'unit_admin'), ah(async (req,
   const out = await tx(async c => {
     // ganti jadwal hasil proses sebelumnya pada periode & unit yang sama (mulai tanggal publikasi)
     // Proses seluruh unit menggantikan semua hasil terbitan unit itu; proses per sub unit hanya menggantikan hasil sub unit yang sama
-    const prev = await c.q(`SELECT id FROM timetable_runs WHERE period_id=$1 AND unit_id=$2 AND id<>$3 AND status='published' AND ($4::int IS NULL OR sub_unit_id=$4)`, [run.period_id, run.unit_id, run.id, run.sub_unit_id]);
+    const grp = run.student_group || null;   // proses satu rombel hanya menggantikan jadwal rombel itu
+    const prev = await c.q(`SELECT id FROM timetable_runs WHERE period_id=$1 AND unit_id=$2 AND id<>$3 AND status='published' AND ($4::int IS NULL OR sub_unit_id=$4) AND ($5::text IS NULL OR student_group=$5)`, [run.period_id, run.unit_id, run.id, run.sub_unit_id, grp]);
     const prevIds = prev.map(x => x.id).concat([run.id]);
     await c.query(`DELETE FROM events WHERE tt_run_id = ANY($1) AND start_at >= $2::date`, [prevIds, from]);
-    if (run.sub_unit_id)   // kelas sub unit ini yang sebelumnya terbit lewat proses seluruh unit ikut digantikan
+    if (grp) await c.query(`DELETE FROM events WHERE start_at >= $2::date AND tt_run_id IS NOT NULL AND tt_class_id IN (SELECT id FROM course_classes WHERE student_group=$1 AND period_id=$3 AND unit_id=$4 AND ($5::int IS NULL OR sub_unit_id=$5))`, [grp, from, run.period_id, run.unit_id, run.sub_unit_id]);
+    else if (run.sub_unit_id)   // kelas sub unit ini yang sebelumnya terbit lewat proses seluruh unit ikut digantikan
       await c.query(`DELETE FROM events WHERE start_at >= $3::date AND tt_class_id IN (SELECT id FROM course_classes WHERE sub_unit_id=$1 AND period_id=$2)
         AND tt_run_id IN (SELECT id FROM timetable_runs WHERE period_id=$2 AND unit_id=$4 AND sub_unit_id IS NULL AND status='published')`, [run.sub_unit_id, run.period_id, from, run.unit_id]);
     await c.query(`UPDATE timetable_runs SET status='done', published_at=NULL WHERE id = ANY($1) AND id<>$2`, [prevIds, run.id]);

@@ -9,9 +9,10 @@
     "db:init": "node db/init.js",
     "db:demo": "node db/demo.js",
     "db:seed-demo": "node db/seed-demo.js",
+    "db:aset": "node db/seed-aset.js",
     "db:fai": "node db/seed-fai.js --impor",
-    "test:ga": "node test/ga.test.js",
-    "test": "node test/mapgeo.test.js && node test/tablekit.test.js && node test/subunit.test.js && node test/ga.test.js"
+    "test:ga": "node test/ga.test.js && node test/conflicts.test.js",
+    "test": "node test/mapgeo.test.js && node test/tablekit.test.js && node test/subunit.test.js && node test/ga.test.js && node test/conflicts.test.js"
   },
   "engines": { "node": ">=18" },
   "dependencies": {

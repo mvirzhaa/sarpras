@@ -41,7 +41,7 @@ route(/^#\/dashboard$/, async (view, _, q) => {
 const FLOOR_MAP_FIELDS = [
   { name: 'floor_height', label: 'Tinggi lantai (m)', type: 'number', min: 2, step: '0.1', default: 4, help: 'Bawaan 4 m; dipakai untuk tampilan 3D Peta kampus' },
   { name: 'wall_custom', label: 'Warna dinding khusus lantai ini (bila tidak, ikut warna gedung)', type: 'checkbox', full: true },
-  { name: 'wall_color', label: 'Warna dinding lantai', type: 'color', default: '#C9B79C' }];
+  { name: 'wall_color', label: 'Warna dinding lantai', type: 'color', default: '#6799FE' }];
 const floorBody = (v, edit) => { const { wall_custom, ...r } = v; r.wall_color = wall_custom ? v.wall_color : null; if (r.floor_height == null) r.floor_height = 4; return r; };
 
 const BUILDING_FIELDS = [
@@ -53,7 +53,7 @@ const BUILDING_FIELDS = [
   { name: 'condition', label: 'Kondisi', type: 'select', options: [['baik', 'Baik'], ['rusak_ringan', 'Rusak ringan'], ['rusak_sedang', 'Rusak sedang'], ['rusak_berat', 'Rusak berat']].map(([v, l]) => ({ value: v, label: l })) },
   { name: 'certificate_no', label: 'No. sertifikat tanah' }, { name: 'permit_no', label: 'No. IMB/PBG' }, { name: 'slf_no', label: 'No. SLF' },
   { name: 'acquisition_value', label: 'Nilai perolehan (Rp)', type: 'money' }, { name: 'latitude', label: 'Lintang', type: 'number', step: 'any' }, { name: 'longitude', label: 'Bujur', type: 'number', step: 'any' },
-  { name: 'wall_color', label: 'Warna dinding gedung', type: 'color', default: '#C9B79C', help: 'Dinding otomatis melapisi seluruh lantai di Peta kampus' },
+  { name: 'wall_color', label: 'Warna dinding gedung', type: 'color', default: '#6799FE', help: 'Dinding otomatis melapisi seluruh lantai di Peta kampus' },
   { name: 'description', label: 'Keterangan', type: 'textarea' },
 ];
 route(/^#\/gedung$/, async view => {
@@ -274,12 +274,14 @@ Pages.roomModal = async (id) => {
       <div class="btn-row" style="margin-top:16px"><a class="btn sm" href="#/jadwal?room=${r.id}">${I('cal')} Jadwal ruang</a><a class="btn sm" href="#/kerusakan?room_id=${r.id}">${I('wrench')} Riwayat kerusakan</a>
       ${r.can_manage ? `<button class="btn sm" id="rmEdit">Ubah status/fasilitas</button><button class="btn sm" id="rmDmg">Catat kerusakan</button>` : ''}</div></div>
     <div style="text-align:center"><img src="${API.url('/rooms/' + r.id + '/qr.svg')}" alt="QR masukan ruang" style="width:160px;height:160px"><p class="muted" style="font-size:13px">QR pintu ruang: pengguna memindai untuk mengirim masukan.<br><button class="btn sm" id="qrPrint">${I('print')} Cetak poster QR</button></p></div></div>
+    <div id="roomAssets" style="margin-top:18px"></div>
     <h3 style="margin-top:18px">Catatan kerusakan terakhir</h3>${UI.table({ rows: r.damages.slice(0, 6), empty: 'Tidak ada catatan kerusakan.', columns: [{ label: 'Tanggal', render: d => fmt.date(d.reported_at) }, { label: 'Kerusakan', key: 'title' }, { label: 'Tingkat', render: d => badge(d.severity) }, { label: 'Status', render: d => badge(d.status) }] })}` });
   if (r.can_manage) {
     $('#rmEdit', m.el).onclick = () => UI.formModal({ title: 'Ubah data ruang', values: r, fields: [{ name: 'capacity', label: 'Kapasitas', type: 'number' }, { name: 'status', label: 'Status', type: 'select', empty: false, options: [{ value: 'aktif', label: 'Aktif' }, { value: 'perbaikan', label: 'Perbaikan' }, { value: 'nonaktif', label: 'Nonaktif' }] },
       { name: 'facilities', label: 'Fasilitas', full: true }, { name: 'description', label: 'Keterangan', type: 'textarea' }], onSubmit: async v => { await API.put('/rooms/' + id, v); m.close(); Ref.clear('rooms', 'myrooms'); Pages.roomModal(id); } });
     $('#rmDmg', m.el).onclick = () => { m.close(); Pages.damageForm({ room_id: id }); };
   }
+  Pages.roomAssets(m, r);
   $('#qrPrint', m.el).onclick = () => {
     const w = window.open('', '_blank');
     w.document.write(`<html><head><title>QR ${esc(r.code)}</title><style>body{font-family:sans-serif;text-align:center;padding:40px}img{width:12cm;height:12cm}h1{font-size:40px;margin:10px 0}p{font-size:20px}</style></head><body>
@@ -695,3 +697,87 @@ route(/^#\/masukan$/, async (view, _, q) => {
       onSubmit: async v => { await API.post(`/feedback/${f.id}/damage`, v); m.close(); UI.toast('Dicatat sebagai kerusakan'); App.render(); } });
   };
 });
+
+Pages.roomAssets = async (m, r) => {
+  const box = $('#roomAssets', m.el); if (!box) return;
+  const load = async () => (await API.get('/assets', { room_id: r.id, limit: 1000 })).rows;
+  const draw = async () => {
+    let rows; try { rows = await load(); } catch (e) { box.innerHTML = `<div class="form-error">${esc(e.message)}</div>`; return; }
+    const val = rows.reduce((t, a) => t + Number(a.price || 0), 0), bad = rows.filter(a => ['rusak', 'rusak_parah'].includes(a.condition)).length;
+    box.innerHTML = `<div class="panel-head" style="padding:0 0 8px"><h3>Aset tetap di ruangan ini</h3><div class="actions">
+        ${r.can_manage ? '<button class="btn sm" id="raNew">Daftarkan aset baru</button><button class="btn sm" id="raAdd">Tambah dari daftar aset</button>' : ''}<a class="btn sm" href="#/aset?room_id=${r.id}">Daftar lengkap</a><button class="btn sm primary" id="raKir">${I('print')} Cetak KIR</button></div></div>
+      <p class="muted" style="margin-bottom:8px">${rows.length} aset · nilai perolehan ${fmt.rp(val)}${bad ? ` · <span class="badge bad">${bad} rusak</span>` : ''}</p>
+      ${UI.table({ rows, empty: 'Belum ada aset tetap yang ditempatkan di ruangan ini.', columns: [
+        { label: 'Kode / NUP', render: a => `<a href="#/aset/${a.id}" class="mono">${esc(a.tag)}</a>` },
+        { label: 'Nama barang', render: a => `<b>${esc(a.name)}</b>${a.brand || a.model ? `<br><small>${esc([a.brand, a.model].filter(Boolean).join(' '))}</small>` : ''}` },
+        { label: 'Perolehan', render: a => a.acquisition_date ? String(a.acquisition_date).slice(0, 4) : '–' }, { label: 'Nilai', num: true, render: a => fmt.rp(a.price) },
+        { label: 'Kondisi', render: a => r.can_manage ? `<select data-cond="${a.id}" style="width:auto;min-width:120px">${UI.options(roomCondOpts, a.condition)}</select>` : badge(a.condition) },
+        ...(r.can_manage ? [{ label: '', render: a => `<span class="btn-row" style="flex-wrap:nowrap"><button class="btn sm" data-edit="${a.id}">Ubah</button><button class="btn sm" data-move="${a.id}">Pindah</button><button class="btn sm danger" data-del="${a.id}">Hapus</button></span>` }] : [])] })}`;
+    $$('[data-edit]', box).forEach(b => b.onclick = async () => { const a = rows.find(x => x.id === Number(b.dataset.edit));
+      UI.formModal({ title: `Ubah data ${a.tag}`, wide: true, fields: await assetFields(true), values: a, onSubmit: async v => { await API.put('/assets/' + a.id, v); UI.toast('Data aset diperbarui'); draw(); } }); });
+    $$('[data-move]', box).forEach(b => b.onclick = async () => { const a = rows.find(x => x.id === Number(b.dataset.move)), rooms = await Ref.get('rooms');
+      UI.formModal({ title: `Pindahkan ${a.name} (${a.tag})`, submit: 'Pindahkan', fields: [{ name: 'to_room_id', label: 'Ruang tujuan', type: 'select', required: true, options: rooms.filter(x => x.id !== r.id).map(x => ({ value: x.id, label: `${x.code} — ${x.name}` })) }, { name: 'reason', label: 'Alasan', full: true }],
+        onSubmit: async v => { await API.post('/mutations', { asset_ids: [a.id], to_room_id: Number(v.to_room_id), reason: v.reason || null }); UI.toast('Aset dipindahkan (mutasi tercatat)'); draw(); } }); });
+    $$('[data-del]', box).forEach(b => b.onclick = () => Pages.disposeForm([Number(b.dataset.del)]));
+    $$('[data-cond]', box).forEach(sel => { const a = rows.find(x => x.id === Number(sel.dataset.cond));
+      sel.onchange = () => UI.formModal({ title: `Kondisi ${a.name} (${a.tag})`, values: { condition: sel.value }, submit: 'Simpan kondisi',
+        fields: [{ name: 'condition', label: 'Kondisi', type: 'select', empty: false, options: roomCondOpts }, { name: 'note', label: 'Catatan (opsional)', type: 'textarea' },
+          { name: 'report_damage', label: 'Catat juga sebagai kerusakan ruang (bila rusak)', type: 'checkbox' }],
+        onSubmit: async v => { await API.post(`/assets/${a.id}/condition`, v); UI.toast('Kondisi diperbarui'); draw(); }, onClose: () => draw() }); });
+    const nw = $('#raNew', box); if (nw) nw.onclick = async () => UI.formModal({ title: `Daftarkan aset baru di ${r.code}`, wide: true, fields: await assetFields(false), values: { quantity: 1, condition: 'baru', acquisition_method: 'pembelian', room_id: r.id },
+      onSubmit: async v => { const x = await API.post('/assets', { ...v, room_id: r.id }); UI.toast(`${x.ids.length} aset terdaftar di ${r.code}`); draw(); } });
+    const add = $('#raAdd', box); if (add) add.onclick = () => Pages.roomAssetPicker(r, draw);
+    $('#raKir', box).onclick = () => Pages.roomKir(r, rows);
+  };
+  await draw();
+};
+const roomCondOpts = Object.entries(COND).map(([k, v]) => ({ value: k, label: v[0] }));
+// Pilih aset yang sudah dimiliki (unit pengelola) untuk ditempatkan ke ruangan ini
+Pages.roomAssetPicker = async (r, done) => {
+  const all = (await API.get('/assets', { limit: 5000 })).rows.filter(a => a.room_id !== r.id);
+  const sel = new Set();
+  const m = UI.modal({ title: `Tambah aset ke ${r.code} (${r.name})`, wide: true,
+    body: `<p class="help">Pilih aset yang sudah tercatat untuk dipindahkan/ditempatkan ke ruangan ini (mutasi internal).</p>
+      <div class="filters" style="margin:10px 0"><input type="search" id="pq" placeholder="Cari nama, kode/NUP, merek, ruang asal…">
+        <label class="check" style="margin-left:auto"><input type="checkbox" id="pfree"> Hanya yang belum punya ruang</label></div>
+      <div class="table-wrap" style="max-height:360px;overflow:auto"><table class="t"><thead><tr><th style="width:36px"></th><th>Kode / NUP</th><th>Nama barang</th><th>Ruang asal</th><th>Kondisi</th></tr></thead>
+        <tbody id="pbody"></tbody></table></div><div class="muted" id="pcnt" style="margin-top:6px;font-size:13px"></div>`,
+    actions: [{ label: 'Batal' }, { label: 'Tempatkan ke ruang ini', kind: 'primary', onClick: async () => {
+      if (!sel.size) throw new Error('Pilih setidaknya satu aset');
+      await API.post('/mutations', { asset_ids: [...sel], to_room_id: r.id, reason: 'Penempatan ke ' + r.code });
+      UI.toast(`${sel.size} aset ditempatkan di ${r.code}`); done();
+    } }] });
+  const draw = () => {
+    const q = $('#pq', m.el).value.trim().toLowerCase(), free = $('#pfree', m.el).checked;
+    const list = all.filter(a => (!free || !a.room_id) && (!q || [a.tag, a.name, a.brand, a.model, a.room_code].some(x => String(x || '').toLowerCase().includes(q)))).slice(0, 300);
+    $('#pbody', m.el).innerHTML = list.map(a => `<tr><td><input type="checkbox" data-a="${a.id}" ${sel.has(a.id) ? 'checked' : ''}></td><td class="mono">${esc(a.tag)}</td><td>${esc(a.name)}${a.brand ? `<br><small>${esc(a.brand)}</small>` : ''}</td>
+      <td>${a.room_code ? esc(a.room_code) : '<span class="muted">Belum ada ruang</span>'}</td><td>${badge(a.condition)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">Tidak ada aset yang cocok.</td></tr>';
+    $('#pcnt', m.el).textContent = `${list.length} ditampilkan · ${sel.size} dipilih`;
+  };
+  m.el.addEventListener('change', e => { const c = e.target.closest('[data-a]'); if (c) { c.checked ? sel.add(Number(c.dataset.a)) : sel.delete(Number(c.dataset.a)); draw(); } else if (e.target.id === 'pfree') draw(); });
+  $('#pq', m.el).oninput = draw; draw();
+};
+// Kartu Inventaris Ruangan (format cetak A4 landscape)
+Pages.roomKir = (r, rows) => {
+  const kb = c => ['baru', 'baik'].includes(c) ? 'B' : c === 'rusak_parah' ? 'RB' : 'KB';
+  const org = App.me.org || {}, tot = rows.reduce((t, a) => t + Number(a.price || 0), 0), n = { B: 0, KB: 0, RB: 0 };
+  rows.forEach(a => n[kb(a.condition)]++);
+  const w = window.open('', '_blank'); if (!w) return UI.err(new Error('Izinkan jendela pop-up untuk mencetak KIR'));
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>KIR ${esc(r.code)}</title><style>
+    @page{size:A4 landscape;margin:12mm} body{font-family:Arial,sans-serif;font-size:11px;color:#000} h1{font-size:15px;text-align:center;margin:0 0 2px} .sub{text-align:center;margin:0 0 10px}
+    table{border-collapse:collapse;width:100%} th,td{border:1px solid #000;padding:3px 5px;vertical-align:top} th{background:#eee;text-align:center} td.c{text-align:center} td.n{text-align:right;white-space:nowrap}
+    .meta td{border:0;padding:1px 4px} .sign{display:flex;justify-content:space-between;margin-top:22px;page-break-inside:avoid} .sign div{width:40%;text-align:center} .sign .sp{height:60px}</style></head><body>
+    <h1>KARTU INVENTARIS RUANGAN (KIR)</h1><p class="sub">${esc(org.name || '')}${r.owner_unit ? ' · ' + esc(r.owner_unit) : ''}</p>
+    <table class="meta" style="width:auto"><tr><td>Gedung</td><td>: ${esc(r.building_name)}</td><td style="padding-left:40px">Kode ruang</td><td>: ${esc(r.code)}</td></tr>
+      <tr><td>Lantai</td><td>: ${esc(r.floor_name || 'Lantai ' + r.floor_level)}</td><td style="padding-left:40px">Nama ruang</td><td>: ${esc(r.name)}</td></tr>
+      <tr><td>Unit pengelola</td><td>: ${esc(r.owner_unit || '–')}</td><td style="padding-left:40px">Tanggal cetak</td><td>: ${fmt.date(new Date())}</td></tr></table>
+    <table style="margin-top:8px"><thead><tr><th rowspan="2">No</th><th rowspan="2">Nama barang</th><th rowspan="2">Merk / model</th><th rowspan="2">No. seri</th><th rowspan="2">Kode barang / NUP</th><th rowspan="2">Tahun perolehan</th><th rowspan="2">Jumlah</th><th rowspan="2">Harga perolehan (Rp)</th><th colspan="3">Keadaan barang</th><th rowspan="2">Keterangan</th></tr><tr><th>B</th><th>KB</th><th>RB</th></tr></thead><tbody>
+    ${rows.map((a, i) => { const k = kb(a.condition); return `<tr><td class="c">${i + 1}</td><td>${esc(a.name)}</td><td>${esc([a.brand, a.model].filter(Boolean).join(' '))}</td><td>${esc(a.serial_number || '')}</td><td>${esc(a.tag)}</td><td class="c">${a.acquisition_date ? String(a.acquisition_date).slice(0, 4) : ''}</td><td class="c">1</td><td class="n">${fmt.num(a.price)}</td>
+      <td class="c">${k === 'B' ? '✓' : ''}</td><td class="c">${k === 'KB' ? '✓' : ''}</td><td class="c">${k === 'RB' ? '✓' : ''}</td><td>${esc(a.notes || '')}</td></tr>`; }).join('') || '<tr><td colspan="12" class="c">Belum ada aset di ruangan ini</td></tr>'}
+    <tr><th colspan="6" style="text-align:right">Jumlah</th><th>${rows.length}</th><th class="n">${fmt.num(tot)}</th><th>${n.B}</th><th>${n.KB}</th><th>${n.RB}</th><th></th></tr></tbody></table>
+    <p style="margin-top:6px">Keterangan: B = Baik (baru/baik), KB = Kurang baik (rusak/dalam perbaikan), RB = Rusak berat.</p>
+    <div class="sign"><div>Mengetahui,<br>${esc(r.owner_unit ? 'Pimpinan ' + r.owner_unit : 'Pimpinan unit')}<div class="sp"></div><b><u>${esc(r.owner_head_name || '………………………')}</u></b>${r.owner_head_nip ? '<br>NIP/NIDN ' + esc(r.owner_head_nip) : ''}</div>
+      <div>Bogor, ……………………………<br>Penanggung jawab ruangan<div class="sp"></div><b>(……………………………)</b></div></div>
+    <script>setTimeout(()=>print(),500)<\/script></body></html>`);
+  w.document.close();
+};

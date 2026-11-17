@@ -90,8 +90,11 @@ const STEPS = [
   // PETA KAMPUS 2D/3D
   `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS map_rotation numeric(6,2) NOT NULL DEFAULT 0`,
   `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS map_footprint jsonb`,
-  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS wall_color varchar(9) NOT NULL DEFAULT '#C9B79C'`,
-  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS roof_color varchar(9)`,
+  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS wall_color varchar(9) NOT NULL DEFAULT '#6799FE'`,
+  `ALTER TABLE buildings ADD COLUMN IF NOT EXISTS roof_color varchar(9) DEFAULT '#6788CB'`,
+  `ALTER TABLE buildings ALTER COLUMN wall_color SET DEFAULT '#6799FE'`,
+  `UPDATE buildings SET wall_color='#6799FE' WHERE wall_color='#C9B79C'`,
+  `ALTER TABLE buildings ALTER COLUMN roof_color SET DEFAULT '#6788CB'`,
   `ALTER TABLE floors ADD COLUMN IF NOT EXISTS floor_height numeric(5,2) NOT NULL DEFAULT 4`,
   `ALTER TABLE floors ADD COLUMN IF NOT EXISTS wall_color varchar(9)`,
 
@@ -117,9 +120,19 @@ const STEPS = [
   `ALTER TABLE courses ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL`,
   `ALTER TABLE course_classes ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL`,
   `ALTER TABLE timetable_runs ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE CASCADE`,
+  `ALTER TABLE timetable_runs ADD COLUMN IF NOT EXISTS student_group varchar(40)`,
   `ALTER TABLE events ADD COLUMN IF NOT EXISTS sub_unit_id int REFERENCES sub_units(id) ON DELETE SET NULL`,
   `CREATE INDEX IF NOT EXISTS cc_sub_idx ON course_classes(sub_unit_id)`,
   `CREATE INDEX IF NOT EXISTS events_sub_idx ON events(sub_unit_id)`,
+
+  // Kodefikasi aset tetap per ruang kelas
+  `INSERT INTO asset_codes (code,name,level,useful_life_years) VALUES
+    ('3.05.02.01.004','Meja Dosen',4,8),
+    ('3.05.02.01.005','Kursi Belajar (Kuliah)',4,8),
+    ('3.05.02.01.006','Papan Tulis (Whiteboard)',4,8),
+    ('3.05.02.02.001','AC Split',4,8),
+    ('3.10.02.03.001','Proyektor (Infokus)',4,4)
+    ON CONFLICT (code) DO UPDATE SET useful_life_years=EXCLUDED.useful_life_years WHERE asset_codes.useful_life_years IS NULL`,
 ];
 module.exports = async function migrate() {
   for (const q of STEPS) await pool.query(q);

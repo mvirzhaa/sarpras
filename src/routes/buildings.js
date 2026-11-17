@@ -111,7 +111,7 @@ r.post('/buildings/:id/floors', roles('superadmin'), ah(async (req, res) => {
 r.get('/floors/:id', ah(async (req, res) => {
   const f = await db.one(`SELECT f.*, b.name building_name, b.code building_code FROM floors f JOIN buildings b ON b.id=f.building_id WHERE f.id=$1`, [req.params.id]);
   if (!f) fail(404, 'Lantai tidak ditemukan');
-  f.rooms = await db.q(`SELECT r.*, c.name category_name, c.color, c.bookable, o.unit_id owner_unit_id, u.name owner_unit
+  f.rooms = await db.q(`SELECT r.*, c.name category_name, c.color, c.bookable, o.unit_id owner_unit_id, u.name owner_unit, u.head_name owner_head_name, u.head_nip owner_head_nip
       FROM rooms r LEFT JOIN room_categories c ON c.id=r.category_id LEFT JOIN v_room_owner o ON o.room_id=r.id LEFT JOIN units u ON u.id=o.unit_id
       WHERE r.floor_id=$1 ORDER BY r.code`, [f.id]);
   f.siblings = await db.q('SELECT id, level, name FROM floors WHERE building_id=$1 ORDER BY level', [f.building_id]);

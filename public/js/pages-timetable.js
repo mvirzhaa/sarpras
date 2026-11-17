@@ -20,11 +20,14 @@ route(/^#\/penjadwalan$/, async (view, _, q) => {
   const subs = unit ? await API.get('/sub-units', { unit_id: unit, active: 1 }).then(r => r.rows).catch(() => []) : [];
   const mySub = App.me.sub_unit_id || null;
   const sub = mySub ? String(mySub) : (subs.some(s => String(s.id) === String(q.sub)) ? String(q.sub) : '');
+  const groups = unit ? await API.get('/tt/groups', { period_id: period, unit_id: unit, sub_unit_id: sub }).then(x => Array.isArray(x) ? x : []).catch(() => []) : [];
+  const group = groups.some(g => g.group === q.group) ? q.group : '';
   if (!period || !unit) { view.innerHTML = App.head('Penjadwalan kuliah') + '<div class="empty">Buat periode akademik dan unit terlebih dahulu.</div>'; return; }
   view.innerHTML = App.head('Penjadwalan kuliah otomatis', 'Masukkan kelas, pilih ruang dan kendala, lalu biarkan algoritma genetika memetik menyusun jadwal tanpa bentrok untuk satu semester.') + `
     <div class="filters"><select id="per">${UI.options(periods.map(p => ({ value: p.id, label: p.name + (p.is_active ? ' (aktif)' : '') })), period)}</select>
       ${App.isSA() ? `<select id="un">${UI.options(units.map(u => ({ value: u.id, label: u.name })), unit)}</select>` : `<b>${esc(App.me.unit_name)}</b>`}
-      ${mySub ? `<b>› ${esc(App.me.sub_unit_name)}</b>` : subs.length ? `<select id="su" aria-label="Sub unit / program studi"><option value="">Seluruh unit (semua program studi)</option>${UI.options(subs.map(s => ({ value: s.id, label: s.name })), sub)}</select>` : ''}</div>
+      ${mySub ? `<b>› ${esc(App.me.sub_unit_name)}</b>` : subs.length ? `<select id="su" aria-label="Sub unit / program studi"><option value="">Seluruh unit (semua program studi)</option>${UI.options(subs.map(s => ({ value: s.id, label: s.name })), sub)}</select>` : ''}
+      ${groups.length ? `<select id="gr" aria-label="Rombel"><option value="">Semua rombel${sub ? '' : ' (semua prodi)'} · ${groups.length} rombel</option>${groups.map(g => `<option value="${esc(g.group)}" ${g.group === group ? 'selected' : ''}>${esc(g.group)} · ${g.n_classes} kelas${g.n_published ? (g.n_published >= g.n_classes ? ' · sudah terbit' : ' · sebagian terbit') : ''}</option>`).join('')}</select>` : ''}</div>
     <div class="tabs" id="tabs"></div><div id="body"></div>`;
   if (App.canWrite()) {
     const rb = document.createElement('button'); rb.className = 'btn danger sm'; rb.id = 'resetTt'; rb.style.marginLeft = 'auto'; rb.textContent = 'Reset jadwal…';
@@ -32,19 +35,20 @@ route(/^#\/penjadwalan$/, async (view, _, q) => {
     rb.onclick = () => ttReset({ period, periods, unit, units, sub, subs });
   }
   $('#per').onchange = e => setQ('#/penjadwalan', { ...q, period: e.target.value });
-  if ($('#un')) $('#un').onchange = e => setQ('#/penjadwalan', { ...q, unit: e.target.value, sub: '' });
-  if ($('#su')) $('#su').onchange = e => setQ('#/penjadwalan', { ...q, sub: e.target.value });
+  if ($('#un')) $('#un').onchange = e => setQ('#/penjadwalan', { ...q, unit: e.target.value, sub: '', group: '' });
+  if ($('#su')) $('#su').onchange = e => setQ('#/penjadwalan', { ...q, sub: e.target.value, group: '' });
+  if ($('#gr')) $('#gr').onchange = e => setQ('#/penjadwalan', { ...q, group: e.target.value });
   UI.tabs($('#tabs'), [['kelas', '1. Kelas & dosen'], ['kendala', '2. Ruang & kendala'], ['hasil', '3. Proses & hasil']], tab, t => setQ('#/penjadwalan', { ...q, tab: t }));
-  const body = $('#body'), ctx = { period, unit, sub, subs, slots, cats, periods };
+  const body = $('#body'), ctx = { period, unit, sub, group, groups, subs, slots, cats, periods };
   if (tab === 'kelas') await ttClasses(body, ctx);
   if (tab === 'kendala') await ttConstraints(body, ctx);
   if (tab === 'hasil') await ttResults(body, ctx, q);
 });
 
-async function ttClasses(body, { period, unit, sub, subs, cats, periods }) {
-  const [rows, courses, people] = await Promise.all([API.get('/tt/classes', { period_id: period, unit_id: unit, sub_unit_id: sub }), API.get('/courses', { limit: 5000 }).then(r => r.rows), Ref.get('people')]);
+async function ttClasses(body, { period, unit, sub, group, subs, cats, periods }) {
+  const [rows, courses, people] = await Promise.all([API.get('/tt/classes', { period_id: period, unit_id: unit, sub_unit_id: sub, student_group: group }), API.get('/courses', { limit: 5000 }).then(r => r.rows), Ref.get('people')]);
   const totalSess = rows.reduce((s, r) => s + r.sessions_per_week * r.duration_slots, 0);
-  body.innerHTML = `<div class="page-head" style="margin-bottom:12px"><p class="lead">${rows.length} kelas · ${totalSess} sesi-jam per pekan · ${sub ? 'program studi ' + esc((subs.find(s => String(s.id) === sub) || {}).name || '') : 'seluruh unit'}</p><div class="actions">
+  body.innerHTML = `<div class="page-head" style="margin-bottom:12px"><p class="lead">${rows.length} kelas · ${totalSess} sesi-jam per pekan · ${group ? 'rombel <b>' + esc(group) + '</b>' : sub ? 'program studi ' + esc((subs.find(s => String(s.id) === sub) || {}).name || '') : 'seluruh unit'}</p><div class="actions">
       <button class="btn" id="copy">Salin dari semester lain</button><button class="btn" id="imp">Impor CSV</button>
       <button class="btn" id="tpl">${I('dl')} Template Excel</button><button class="btn" id="impx">${I('dl')} Impor Excel</button><button class="btn primary" id="add">${I('plus')} Tambah kelas</button></div></div>
     <div class="panel">${UI.table({ rows, empty: 'Belum ada kelas. Tambah manual, impor CSV, atau salin dari semester sebelumnya.', rowAttr: r => `class="click" data-c="${r.id}"`, columns: [
@@ -55,7 +59,7 @@ async function ttClasses(body, { period, unit, sub, subs, cats, periods }) {
       { label: 'Ruang', render: r => esc(r.fixed_room_code || r.category_name || 'Bebas') }] })}</div>`;
   const courseOpts = courses.map(c => ({ value: c.id, label: `${c.code} — ${c.name} (${c.credits} sks)` }));
   const fields = async () => [{ name: 'course_id', label: 'Mata kuliah', type: 'select', required: true, options: courseOpts, full: true, help: 'Belum ada? Tambahkan di menu Mata kuliah atau lewat impor CSV.' },
-    { name: 'class_name', label: 'Nama kelas', required: true, default: 'A' }, { name: 'student_group', label: 'Rombel (tidak boleh bentrok)', placeholder: 'mis. TI-3A' },
+    { name: 'class_name', label: 'Nama kelas', required: true, default: 'A' }, { name: 'student_group', label: 'Rombel (tidak boleh bentrok)', placeholder: 'mis. TI-3A', default: group || undefined },
     { name: 'lecturer_id', label: 'Dosen', type: 'select', options: people.filter(p => p.kind === 'dosen').map(p => ({ value: p.id, label: p.name })) },
     ...(App.me.sub_unit_id || !subs.length ? [] : [{ name: 'sub_unit_id', label: 'Program studi / sub unit', type: 'select', empty: 'Tingkat unit (seluruh fakultas)', options: subs.map(s => ({ value: s.id, label: s.name })), help: 'Kosongkan bila kelas dikelola tingkat unit' }]),
     { name: 'student_count', label: 'Jumlah mahasiswa', type: 'number', default: 30, min: 1 }, { name: 'duration_slots', label: 'Durasi (sesi berurutan)', type: 'number', default: 2, min: 1, help: 'Umumnya = sks' },
@@ -132,7 +136,7 @@ function parseCSV(text) {
   return lines.slice(1).map(l => Object.fromEntries(split(l).map((v, i) => [h[i], v])));
 }
 
-async function ttConstraints(body, { period, unit, sub, subs, slots, cats }) {
+async function ttConstraints(body, { period, unit, sub, group, subs, slots, cats }) {
   const [runs, people, courses, rooms] = await Promise.all([API.get('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub }), Ref.get('people'), API.get('/courses', { limit: 5000 }).then(r => r.rows), API.get('/rooms', App.isSA() ? { unit_id: unit } : { mine: 1 }).then(r => r.rows)]);
   const key = `tt_cfg_${unit}_${sub || 'all'}`;
   const saved = JSON.parse(localStorage.getItem(key) || 'null');
@@ -181,8 +185,7 @@ async function ttConstraints(body, { period, unit, sub, subs, slots, cats }) {
       <div class="panel" style="margin-top:18px"><div class="panel-head"><h3>Kendala khusus</h3><div class="actions"><select id="addCon" style="width:auto"><option value="">+ Tambah kendala…</option>${Object.entries(CON_TYPES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}</select></div></div>
         <div class="panel-body">${cfg.constraints.map(conCard).join('') || '<div class="empty">Tanpa kendala khusus: algoritma hanya mencegah bentrok ruang, dosen, dan rombel.</div>'}
         <p class="muted" style="font-size:13px;margin-top:12px">Kendala <b>wajib</b> dipenuhi mutlak (mempersempit pilihan waktu). Kendala lain bersifat preferensi; bobot makin besar makin diprioritaskan. Bentrok ruang, dosen, rombel, dan kapasitas ruang selalu dijaga.</p></div></div>
-      <p class="muted" style="margin-top:18px;font-size:13px">Jadwalkan <b>satu program studi demi satu</b>: hasil sementara prodi lain pada periode ini (yang sudah selesai diproses walau belum dipublikasikan) otomatis dihindari, baik ruang maupun jam mengajar dosennya, sehingga tidak bentrok dengan prodi yang lebih dulu. Menjalankan ulang sebuah prodi menggantikan hasil sementara prodi itu sendiri.</p>
-      <div class="btn-row" style="margin-top:8px;justify-content:flex-end"><button class="btn primary" id="run">${I('cpu')} Simpan & jalankan penjadwalan</button></div>`;
+      <div class="btn-row" style="margin-top:18px;justify-content:flex-end"><span class="muted" style="margin-right:auto;align-self:center">Cakupan proses: <b>${group ? 'rombel ' + esc(group) : sub ? 'program studi ' + esc((subs.find(s => String(s.id) === sub) || {}).name || '') : 'seluruh unit'}</b></span><button class="btn primary" id="run">${I('cpu')} ${group ? 'Simpan & jalankan untuk rombel ' + esc(group) : 'Simpan & jalankan penjadwalan'}</button></div>`;
   };
   draw();
   body.oninput = body.onchange = e => {
@@ -208,17 +211,17 @@ async function ttConstraints(body, { period, unit, sub, subs, slots, cats }) {
   body.onclick = async e => {
     const rm = e.target.closest('[data-rm]'); if (rm) { cfg.constraints.splice(Number(rm.dataset.rm), 1); save(); return draw(); }
     if (e.target.closest('#run')) {
-      try { const r = await API.post('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub, room_scope: cfg.room_scope, constraints: cfg.constraints, params: cfg.params }); setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: r.id }); } catch (er) { UI.err(er); }
+      try { const r = await API.post('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub, student_group: group || null, room_scope: cfg.room_scope, constraints: cfg.constraints, params: cfg.params }); setQ('#/penjadwalan', { period, unit, sub, group, tab: 'hasil', run: r.id }); } catch (er) { UI.err(er); }
     }
   };
 }
 
-async function ttResults(body, { period, unit, sub, slots }, q) {
-  const runs = await API.get('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub });
-  if (!runs.length) { body.innerHTML = '<div class="empty">Belum ada proses penjadwalan. Atur ruang & kendala, lalu jalankan.</div>'; return; }
+async function ttResults(body, { period, unit, sub, group, slots }, q) {
+  const runs = await API.get('/tt/runs', { period_id: period, unit_id: unit, sub_unit_id: sub, student_group: group });
+  if (!runs.length) { body.innerHTML = `<div class="empty">Belum ada proses penjadwalan${group ? ' untuk rombel ' + esc(group) : ''}. Atur ruang & kendala, lalu jalankan.</div>`; return; }
   const runId = Number(q.run) || runs[0].id;
-  body.innerHTML = `<div class="filters"><select id="runSel" style="min-width:360px">${runs.map(r => `<option value="${r.id}" ${r.id === runId ? 'selected' : ''}>#${r.id} · ${esc(r.sub_unit_name || 'Seluruh unit')} · ${fmt.dt(r.created_at)} · ${STATUS[r.status][0]}${r.hard_violations !== null ? ` · bentrok ${r.hard_violations}` : ''}</option>`).join('')}</select></div><div id="runBody"></div>`;
-  $('#runSel').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: e.target.value });
+  body.innerHTML = `<div class="filters"><select id="runSel" style="min-width:360px">${runs.map(r => `<option value="${r.id}" ${r.id === runId ? 'selected' : ''}>#${r.id} · ${esc(r.student_group ? 'Rombel ' + r.student_group : r.sub_unit_name || 'Seluruh unit')} · ${fmt.dt(r.created_at)} · ${STATUS[r.status][0]}${r.hard_violations !== null ? ` · bentrok ${r.hard_violations}` : ''}</option>`).join('')}</select></div><div id="runBody"></div>`;
+  $('#runSel').onchange = e => setQ('#/penjadwalan', { period, unit, sub, group, tab: 'hasil', run: e.target.value });
   let timer;
   const show = async () => {
     const run = await API.get('/tt/runs/' + runId), rb = $('#runBody'); if (!rb) return clearInterval(timer);
@@ -235,24 +238,17 @@ async function ttResults(body, { period, unit, sub, slots }, q) {
     const keyOf = { room: a => a.room_code, lecturer: a => a.lecturer_name || '(tanpa dosen)', group: a => a.group || '(tanpa rombel)' }[view];
     const keys = [...new Set(A.map(keyOf))].sort();
     const pick = q.key && keys.includes(q.key) ? q.key : keys[0];
-    const confIds = new Set((R.conflicts || []).map(c => c.class_id));
-    // Satu kelas bisa memakai beberapa sesi berurutan: semua sesi yang dipakai digambar (bukan hanya sesi awal)
-    const spanOf = a => Math.max(1, rs.findIndex(s => s.slot_no === a.slot_end) - a.slot_index + 1);
-    const cell = (d, si) => {
-      const hit = A.map((a, i) => [a, i]).filter(([a]) => keyOf(a) === pick && a.day === d && si >= a.slot_index && si < a.slot_index + spanOf(a));
-      if (!hit.length) return '<td></td>';
-      const conf = hit.some(([a]) => confIds.has(a.class_id)), cont = hit.some(([a]) => si > a.slot_index), more = hit.some(([a]) => si < a.slot_index + spanOf(a) - 1);
-      const html = hit.map(([a, i]) => {
-        const n = spanOf(a), pos = si - a.slot_index;
-        if (pos > 0) return `<div class="tt-cell tt-next" data-ai="${i}"><small>↳ ${esc(a.course_code)} ${esc(a.class_name)} · lanjutan (${pos + 1}/${n})</small></div>`;
-        return `<div class="tt-cell ${confIds.has(a.class_id) ? 'conf' : ''}" data-ai="${i}"><b>${esc(a.course_code)} ${esc(a.class_name)}</b><br>${esc(a.course_name)}<br><small>${esc(view === 'room' ? a.lecturer_name || '' : a.room_code)} · ${esc(a.group || '')} · ${a.start_time}–${a.end_time}${n > 1 ? ` · ${n} sesi` : ''}</small></div>`;
-      }).join('');
-      return `<td class="tt-on${conf ? ' conf' : ''}${cont ? ' cont' : ''}${more ? ' more' : ''}">${html}</td>`;
-    };
+    const C = R.hard > 0 ? await API.get(`/tt/runs/${runId}/conflicts`).catch(() => null) : null;
+    const confIds = new Set(((C && C.rows) || []).map(c => c.class_id));
+    const editable = run.status === 'done' && App.canWrite();
+    const durOf = a => rs.findIndex(x => x.slot_no === a.slot_end) - a.slot_index + 1;
+    const cell = (d, si) => A.map((a, i) => [a, i]).filter(([a]) => keyOf(a) === pick && a.day === d && a.slot_index <= si && si < a.slot_index + durOf(a))
+      .map(([a, i]) => a.slot_index === si
+        ? `<div class="tt-cell ${confIds.has(a.class_id) ? 'conf' : ''}" data-ai="${i}" ${editable ? 'draggable="true"' : ''} title="${editable ? 'Seret ke posisi lain, atau klik untuk mengubah ruang' : ''}"><b>${esc(a.course_code)} ${esc(a.class_name)}</b><br>${esc(a.course_name)}<br><small>${esc(view === 'room' ? a.lecturer_name || '' : a.room_code)} · ${esc(a.group || '')} · ${a.start_time}–${a.end_time}${durOf(a) > 1 ? ' · ' + durOf(a) + ' sesi' : ''}</small></div>`
+        : `<div class="tt-cell cont ${confIds.has(a.class_id) ? 'conf' : ''}">↳ ${esc(a.course_code)} ${esc(a.group || a.class_name)} · lanjutan (${si - a.slot_index + 1}/${durOf(a)})</div>`).join('')
     rb.innerHTML = `<div class="stats"><div class="stat"><b>${R.hard}</b><span>Bentrok keras</span></div><div class="stat"><b>${fmt.num(R.soft, 1)}</b><span>Penalti preferensi</span></div>
         <div class="stat"><b>${A.length}</b><span>Sesi terjadwal</span></div><div class="stat"><b>${fmt.num(R.generations)}</b><span>Generasi</span></div><div class="stat"><b>${fmt.num(R.ms / 1000, 1)} dtk</b><span>Waktu proses</span></div></div>
-      ${R.hard ? `<div class="form-error">${R.hard} bentrok tersisa: ${(R.conflicts || []).slice(0, 8).map(c => `${esc(c.label)} (${c.reasons.join(', ')})`).join('; ')}. Tambah ruang/hari, longgarkan kendala wajib, atau ubah manual.</div>` : ''}
-      ${((run.params || {}).avoid_runs || []).length ? `<p class="muted" style="margin:0 0 12px;font-size:13px">Proses ini menghindari ruang & jam dosen pada hasil sementara: ${run.params.avoid_runs.map(x => `<b>#${x.id} ${esc(x.sub_unit_name)}</b> (${x.sessions} sesi)`).join(', ')}. Bila ada bentrok tersisa dengan hasil tersebut, alasannya tertulis pada daftar bentrok di atas.</p>` : ''}
+      ${C && C.total ? '<div id="confBox"></div>' : ''}
       ${R.warnings && R.warnings.length ? `<details style="margin-bottom:12px"><summary class="muted">${R.warnings.length} catatan</summary><ul>${R.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>` : ''}
       <div class="filters"><select id="by"><option value="room" ${view === 'room' ? 'selected' : ''}>Per ruang</option><option value="lecturer" ${view === 'lecturer' ? 'selected' : ''}>Per dosen</option><option value="group" ${view === 'group' ? 'selected' : ''}>Per rombel</option></select>
         <select id="key">${keys.map(k => `<option ${k === pick ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>
@@ -260,17 +256,17 @@ async function ttResults(body, { period, unit, sub, slots }, q) {
         ${run.status === 'published' ? `<span class="badge ok">Dipublikasikan ${fmt.dt(run.published_at)}</span><button class="btn sm" id="pub">Publikasikan ulang</button>` : `<button class="btn primary sm" id="pub">${I('check')} Publikasikan ke jadwal</button>`}
         <button class="btn sm danger" id="delRun">Hapus</button></span></div>
       <div class="table-wrap"><table class="tt-grid"><thead><tr><th>Sesi</th>${days.map(d => `<th>${ISO_DAY[d]}</th>`).join('')}</tr></thead><tbody>
-        ${rs.map((s, si) => `<tr><th style="white-space:nowrap">${s.slot_no}<br><small>${s.start_time}</small></th>${days.map(d => cell(d, si)).join('')}</tr>`).join('')}</tbody></table></div>
-      <p class="muted" style="font-size:13px;margin-top:8px">Klik kartu kelas untuk memindahkan secara manual sebelum dipublikasikan.</p>`;
-    $('#by').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: runId, by: e.target.value });
-    $('#key').onchange = e => setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil', run: runId, by: view, key: e.target.value });
+        ${rs.map((s, si) => `<tr><th style="white-space:nowrap">${s.slot_no}<br><small>${s.start_time}</small></th>${days.map(d => `<td data-d="${d}" data-si="${si}">${cell(d, si)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="muted" style="font-size:13px;margin-top:8px">${run.status === 'done' ? 'Seret kartu kelas ke posisi kosong untuk memindahkan secara manual (klik kartu untuk mengganti ruang). Pemindahan ditolak bila dosen, ruang, atau rombel sudah terisi di waktu tersebut.' : 'Hasil yang sudah dipublikasikan tidak dapat diedit.'}</p>`;
+    $('#by').onchange = e => setQ('#/penjadwalan', { period, unit, sub, group, tab: 'hasil', run: runId, by: e.target.value });
+    $('#key').onchange = e => setQ('#/penjadwalan', { period, unit, sub, group, tab: 'hasil', run: runId, by: view, key: e.target.value });
     $('#csv').onclick = () => {
       const lines = [['hari', 'mulai', 'selesai', 'kode_mk', 'mata_kuliah', 'kelas', 'rombel', 'dosen', 'ruang', 'mahasiswa'].join(',')].concat(
         [...A].sort((a, b) => a.day - b.day || a.slot_index - b.slot_index).map(a => [ISO_DAY[a.day], a.start_time, a.end_time, a.course_code, `"${a.course_name}"`, a.class_name, a.group || '', `"${a.lecturer_name || ''}"`, a.room_code, a.size].join(',')));
       const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv' }); const u = URL.createObjectURL(blob);
       const l = document.createElement('a'); l.href = u; l.download = `jadwal-run-${runId}.csv`; l.click(); URL.revokeObjectURL(u);
     };
-    $('#delRun').onclick = async () => { if (await UI.confirm('Hapus hasil ini? Jika sudah dipublikasikan, jadwal kuliah dari hasil ini ikut terhapus.', { danger: true, ok: 'Hapus' })) { await API.del('/tt/runs/' + runId); setQ('#/penjadwalan', { period, unit, sub, tab: 'hasil' }); } };
+    $('#delRun').onclick = async () => { if (await UI.confirm('Hapus hasil ini? Jika sudah dipublikasikan, jadwal kuliah dari hasil ini ikut terhapus.', { danger: true, ok: 'Hapus' })) { await API.del('/tt/runs/' + runId); setQ('#/penjadwalan', { period, unit, sub, group, tab: 'hasil' }); } };
     $('#pub').onclick = () => UI.formModal({ title: 'Publikasikan jadwal kuliah', submit: 'Publikasikan',
       fields: [{ name: 'start_date', label: 'Mulai tanggal', type: 'date', help: 'Kosong = awal periode' }, { name: 'end_date', label: 'Sampai tanggal', type: 'date', help: 'Kosong = akhir periode' },
         { name: 'skip_dates', label: 'Tanggal dikecualikan (libur, UTS/UAS)', type: 'textarea', placeholder: '2026-10-20, 2026-10-21 …', help: 'Pisahkan dengan koma/baris baru. Rentang: 2026-11-02..2026-11-07' },
@@ -284,6 +280,25 @@ async function ttResults(body, { period, unit, sub, slots }, q) {
         const r = await API.post(`/tt/runs/${runId}/publish`, { ...v, skip_dates: skip });
         UI.modal({ title: 'Jadwal dipublikasikan', body: `<p>${fmt.num(r.created)} dari ${fmt.num(r.expected)} pertemuan masuk ke jadwal ruang.</p>${r.skipped.length ? `<div class="form-error">${r.skipped.map(esc).join('<br>')}</div>` : ''}`, actions: [{ label: 'Tutup', onClick: () => App.render() }] });
       } });
+    if (C && C.total) drawConflicts(C, { run, runId, view });
+    if (editable) {
+      let dragIdx = null;
+      rb.ondragstart = e => { const c = e.target.closest('[data-ai]'); if (!c) return; dragIdx = Number(c.dataset.ai); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragIdx)); c.classList.add('dragging'); };
+      rb.ondragend = () => { dragIdx = null; $$('.dragging, .drop', rb).forEach(x => x.classList.remove('dragging', 'drop')); };
+      rb.ondragover = e => { const td = e.target.closest('td[data-d]'); if (!td || dragIdx === null) return; e.preventDefault(); $$('.drop', rb).forEach(x => x !== td && x.classList.remove('drop')); td.classList.add('drop'); };
+      rb.ondrop = async e => {
+        const td = e.target.closest('td[data-d]'); if (!td || dragIdx === null) return; e.preventDefault();
+        const idx = dragIdx; dragIdx = null; td.classList.remove('drop');
+        const a = A[idx], room = view === 'room' ? (R.rooms.find(r => r.code === pick) || {}).id : undefined;
+        if (a.day === Number(td.dataset.d) && a.slot_index === Number(td.dataset.si) && (!room || room === a.room_id)) return;
+        try {
+          await API.put(`/tt/runs/${runId}/assignment`, { index: idx, day: Number(td.dataset.d), slot_index: Number(td.dataset.si), room_id: room });
+          UI.toast(`${a.course_code} ${a.class_name} dipindahkan ke ${ISO_DAY[td.dataset.d]} sesi ${rs[td.dataset.si].slot_no}`); show();
+        } catch (er) {
+          UI.modal({ title: 'Pemindahan ditolak', body: `<p><b>${esc(a.course_code)} ${esc(a.course_name)} (${esc(a.class_name)})</b> tidak dipindahkan.</p><div class="form-error" style="margin-top:10px">${esc(er.message || String(er))}</div>`, actions: [{ label: 'Tutup' }] });
+        }
+      };
+    }
     rb.onclick = e => {
       const c = e.target.closest('[data-ai]'); if (!c || run.status === 'published') return;
       const idx = Number(c.dataset.ai), a = A[idx];
@@ -352,3 +367,25 @@ async function ttReset({ period, periods, unit, units, sub, subs }) {
   };
   layout();
 }
+
+// Tabel mata kuliah yang bentrok, dipisah per penyebab, dengan ekspor Excel
+function drawConflicts(C, { runId, view }) {
+  const box = $('#confBox'); if (!box) return;
+  let only = '';
+  const draw = () => {
+    const list = C.rows.filter(r => !only || r.cause === only);
+    const groupsBy = C.causes.filter(c => c.count && (!only || c.key === only));
+    box.innerHTML = `<div class="panel" style="margin-bottom:14px"><div class="panel-head"><h3>${C.total} mata kuliah bentrok</h3><div class="actions">
+        <a class="btn sm" href="${API.url(`/tt/runs/${runId}/conflicts.xlsx`)}">${I('dl')} Unduh Excel</a></div></div>
+      <div class="panel-body"><div class="btn-row" style="margin-bottom:10px;flex-wrap:wrap"><button class="btn sm ${only ? '' : 'primary'}" data-cause="">Semua (${C.total})</button>
+        ${C.causes.filter(c => c.count).map(c => `<button class="btn sm ${only === c.key ? 'primary' : ''}" data-cause="${c.key}">${esc(c.label)} (${c.count})</button>`).join('')}</div>
+        <div class="table-wrap" style="max-height:420px;overflow:auto"><table class="tt-conf"><thead><tr><th>No</th><th>Kode MK</th><th>Mata kuliah</th><th>Kelas</th><th>Rombel</th><th>Dosen</th><th>Waktu</th><th>Ruang</th><th>Bentrok dengan</th></tr></thead><tbody>
+        ${groupsBy.map(c => `<tr class="grp"><th colspan="9">${esc(c.label)} · ${c.count} mata kuliah</th></tr>` + list.filter(r => r.cause === c.key).map((r, i) => `<tr class="click" data-g="${esc(r.group)}"><td>${i + 1}</td><td class="mono">${esc(r.course_code)}</td><td>${esc(r.course_name)}</td><td>${esc(r.class_name)}</td><td>${esc(r.group || '–')}</td><td>${esc(r.lecturer_name || '–')}</td>
+          <td style="white-space:nowrap">${ISO_DAY[r.day]} ${r.start_time}–${r.end_time}</td><td>${esc(r.room_code)}</td><td>${r.with.map(esc).join('<br>')}</td></tr>`).join('')).join('')}</tbody></table></div>
+        <p class="muted" style="font-size:13px;margin-top:8px">Klik baris untuk membuka jadwal rombelnya, lalu seret kartu yang berwarna merah ke posisi kosong.</p></div></div>`;
+    $$('[data-cause]', box).forEach(b => b.onclick = () => { only = b.dataset.cause; draw(); });
+    $$('tr[data-g]', box).forEach(tr => tr.onclick = () => { const g = tr.dataset.g; if (g) setQ('#/penjadwalan', { ...parseHashQ(), tab: 'hasil', run: runId, by: 'group', key: g }); });
+  };
+  draw();
+}
+const parseHashQ = () => Object.fromEntries(new URLSearchParams((location.hash.split('?')[1] || '')));

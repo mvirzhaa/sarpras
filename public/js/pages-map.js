@@ -112,8 +112,8 @@
       ${G.isPlaced(b) ? `<p class="help" style="margin:6px 0">${st.edit ? 'Seret gedung atau klik titik di peta untuk memindahkan.' : ''}</p>
       <label class="field"><span>Putaran: <b id="rotV">${Math.round(b.map_rotation)}</b>°</span><input type="range" id="eRot" min="0" max="359" value="${Math.round(b.map_rotation)}"></label>` : ''}
       <div class="form-grid" style="margin-top:8px"><label class="field"><span>Warna dinding</span><input type="color" id="eWall" value="${esc(G.HEX.test(b.wall_color) ? b.wall_color : G.DEF_WALL)}"></label>
-        <label class="field"><span>Warna atap</span><input type="color" id="eRoof" value="${esc(G.HEX.test(b.roof_color || '') ? b.roof_color : G.shade(G.stack(b).slice(-1)[0]?.color || G.DEF_WALL, -0.3))}"></label>
-        <label class="check full"><input type="checkbox" id="eRoofAuto" ${G.HEX.test(b.roof_color || '') ? '' : 'checked'}> Warna atap otomatis (lebih gelap dari dinding)</label></div>
+        <label class="field"><span>Warna atap</span><input type="color" id="eRoof" value="${esc(G.HEX.test(b.roof_color || '') ? b.roof_color : G.DEF_ROOF)}"></label>
+        <label class="check full"><input type="checkbox" id="eRoofAuto" ${G.HEX.test(b.roof_color || '') ? '' : 'checked'}> Warna atap bawaan (#6788CB)</label></div>
       <p class="help">Dinding menyelimuti seluruh lantai. Warna khusus per lantai diatur di halaman gedung → ubah lantai.</p>
       <div class="btn-row" style="margin-top:8px"><button class="btn sm" id="eShape">Bentuk tapak…</button><button class="btn sm" id="eDen">Ambil dari denah</button></div>
       <div class="btn-row" style="margin-top:10px"><button class="btn primary" id="eSave" ${st.dirty ? '' : 'disabled'}>Simpan perubahan</button></div>`;

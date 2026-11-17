@@ -376,3 +376,13 @@ tr[data-hp], tr[data-hf] { display: none; }
 .map-label.on { background: var(--plan); color: #fff; border-color: var(--plan); }
 input[type=color] { width: 100%; height: 36px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: #fff; }
 @media (max-width: 900px) { .mapx { grid-template-columns: 1fr; } .cmap { height: 60vh; } }
+.tt-cell[draggable=true] { cursor: grab; }
+.tt-cell.dragging { opacity: .45; }
+.tt-cell.cont { background: #EEF3FA; border-left-style: dashed; color: var(--muted, #667); font-size: 11px; cursor: default; }
+.tt-cell.cont.conf { background: var(--red-soft); }
+.tt-grid td.drop { outline: 2px dashed var(--green, #146B4E); outline-offset: -3px; background: #F1F8F4; }
+.tt-conf { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.tt-conf th, .tt-conf td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+.tt-conf thead th { position: sticky; top: 0; background: #FAFBFA; z-index: 1; }
+.tt-conf tr.grp th { background: var(--red-soft); color: #8A2B22; font-weight: 650; position: static; }
+.tt-conf tr.click { cursor: pointer; } .tt-conf tr.click:hover td { background: #FAFBFA; }

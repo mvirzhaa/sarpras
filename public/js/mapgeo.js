@@ -2,7 +2,7 @@
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.MapGeo = factory(); })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
   const M_LAT = 111320;
-  const DEF_WALL = '#C9B79C', DEF_FLOOR_H = 4;
+  const DEF_WALL = '#6799FE', DEF_ROOF = '#6788CB', DEF_FLOOR_H = 4;
   const rad = d => (d * Math.PI) / 180, round = v => Math.round(v * 100) / 100;
   const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -83,10 +83,10 @@
       const base = { bid: b.id, code: b.code || '', name: b.name || '' };
       st.forEach((f, i) => solids.push({ type: 'Feature', properties: { ...base, kind: 'floor', level: f.level, base: f.base, top: f.top, color: i % 2 ? shade(f.color, -0.05) : f.color }, geometry: { type: 'Polygon', coordinates: [rg] } }));
       const top = st[st.length - 1].top, wall = st[st.length - 1].color;
-      solids.push({ type: 'Feature', properties: { ...base, kind: 'roof', level: st[st.length - 1].level, base: top, top: top + 0.4, color: HEX.test(b.roof_color || '') ? b.roof_color : shade(wall, -0.3) }, geometry: { type: 'Polygon', coordinates: [rg] } });
+      solids.push({ type: 'Feature', properties: { ...base, kind: 'roof', level: st[st.length - 1].level, base: top, top: top + 0.4, color: HEX.test(b.roof_color || '') ? b.roof_color : DEF_ROOF }, geometry: { type: 'Polygon', coordinates: [rg] } });
       outlines.push({ type: 'Feature', properties: { ...base, kind: 'outline' }, geometry: { type: 'Polygon', coordinates: [rg] } });
     }
     return { solids: { type: 'FeatureCollection', features: solids }, outlines: { type: 'FeatureCollection', features: outlines } };
   };
-  return { M_LAT, DEF_WALL, DEF_FLOOR_H, HEX, area, signedArea, rect, hull, derive, fallback, toLngLat, fromLngLat, shade, stack, totalHeight, collection, isPlaced, round };
+  return { M_LAT, DEF_WALL, DEF_ROOF, DEF_FLOOR_H, HEX, area, signedArea, rect, hull, derive, fallback, toLngLat, fromLngLat, shade, stack, totalHeight, collection, isPlaced, round };
 });
