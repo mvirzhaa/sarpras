@@ -14,6 +14,8 @@ const srv = http.createServer((req, res) => {
       if (P === '/api/auth/me') return json(res, { id: 1, name: 'SA', role: 'superadmin', org: { short: 'U', name: 'Universitas Ibn Khaldun' } });
       if (P === '/api/rooms/7') return json(res, ROOM);
       if (P === '/api/assets') return json(res, { rows: u.searchParams.get('room_id') === '7' ? AS.filter(a => a.room_id === 7) : AS, total: 4 });
+      if (/^\/api\/assets\/\d+$/.test(P) && req.method === 'GET') return json(res, { id: 1, tag: '3.05.02.01.001.00001', nup: 1, name: 'Proyektor', condition: 'baik', status: 'aktif', room_code: 'FAI-1.1', room_name: 'K1', building_name: 'FAI', price: 100000, book_value: 90000, can_manage: true, code_path: [{ name: 'Mebel' }],
+        history: [{ action: 'mutasi', created_at: '2026-11-01T00:00:00Z', from_room: 'FAI-1.0', to_room: 'FAI-1.1', user_name: 'SA' }, { action: 'kondisi', created_at: '2026-11-02T00:00:00Z', from_condition: 'baik', to_condition: 'rusak', note: 'lampu mati' }], maintenance: [{ id: 1, start_date: '2026-11-03', description: 'Ganti lampu', vendor: 'CV X', cost: 50000, status: 'selesai' }] });
       if (P === '/api/rooms') return json(res, { rows: [{ id: 7, code: 'FAI-1.1', name: 'K1' }, { id: 8, code: 'FAI-1.2', name: 'K2' }] });
       if (P === '/api/assets/dispose') return json(res, { id: 5 });
       if (P === '/api/assets' && req.method === 'POST') return json(res, { ids: [9] }, 201);
@@ -45,6 +47,11 @@ const srv = http.createServer((req, res) => {
   await pg.check('[data-a="4"]'); await pg.click('.modal-foot .primary'); await pg.waitForTimeout(250);
   const m1 = calls.find(c => c[1] === '/api/mutations');
   ok('POST mutasi ke ruang 7', m1 && m1[2].to_room_id === 7 && m1[2].asset_ids.length === 1 && m1[2].asset_ids[0] === 4, m1);
+  await pg.click('[data-info="1"]'); await pg.waitForSelector('img.qr');
+  const info = await pg.locator('.modal[aria-label="Proyektor"]').innerText();
+  ok('detail aset: posisi, riwayat mutasi, perbaikan, kondisi', info.includes('FAI-1.1') && info.includes('FAI-1.0') && info.includes('Ganti lampu') && info.includes('lampu mati'), info.slice(0, 300));
+  ok('QR label tampil', await pg.locator('img.qr').getAttribute('src').then(x => /\/assets\/1\/qr\.svg/.test(x)));
+  await pg.evaluate(() => { const m = document.querySelectorAll('.modal-bg'); m[m.length - 1].remove(); });
   // tambah aset baru, ubah, pindah, hapus
   calls.length = 0; await pg.click('#raNew'); await pg.waitForSelector('[name=name]'); await pg.fill('[name=name]', 'Kursi'); await pg.evaluate(() => { const h = document.querySelector('[name=asset_code_id]'); if (h) h.value = '12'; });
   await pg.click('.modal-foot .primary'); await pg.waitForTimeout(250);

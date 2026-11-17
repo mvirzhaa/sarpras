@@ -32,7 +32,7 @@
     view.innerHTML = App.head('Peta kampus', 'Posisi gedung di lokasi nyata, tampilan 2D atau 3D sesuai jumlah dan tinggi lantai') + '<div class="empty">Memuat peta…</div>';
     let blds;
     try { [blds] = await Promise.all([API.get('/map/buildings').then(r => r.rows), loadLib()]); } catch (e) { view.innerHTML = App.head('Peta kampus') + `<div class="empty">${esc(e.message)}</div>`; return; }
-    const st = { sel: q.b ? Number(q.b) : null, mode: '3d', base: 'osm', upTo: 999, edit: false, dirty: false };
+    const st = { sel: q.b ? Number(q.b) : null, mode: '3d', base: 'osm', upTo: 999, edit: false, dirty: false, draw: null };
     const get = id => blds.find(b => b.id === id), cur = () => get(st.sel);
     const maxLevel = Math.max(1, ...blds.flatMap(b => b.floors.map(f => f.level)));
 
@@ -44,6 +44,8 @@
             <div class="seg" id="segBase"><button data-b="osm" class="on">Peta</button><button data-b="sat">Satelit</button><button data-b="none">Polos</button></div>
             <label class="inl">Tampilkan s.d. lantai <select id="upTo"><option value="999">Semua</option>${Array.from({ length: maxLevel }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}</select></label>
             <button class="btn sm" id="north" title="Hadapkan ke utara">${I('map')} Utara</button>
+            ${sa ? `<button class="btn sm primary" id="drawNew">${I('plus')} Gambar gedung baru</button>
+            <span id="drawBar" class="btn-row" hidden><button class="btn sm" id="drUndo">Urungkan titik</button><button class="btn sm primary" id="drDone">Selesai &amp; isi identitas</button><button class="btn sm" id="drCancel">Batal</button><b id="drInfo" class="muted"></b></span>` : ''}
           </div>
           <div id="cmap" class="cmap" role="application" aria-label="Peta kampus"></div>
           <div class="mapx-note muted" id="mnote"></div>
@@ -151,6 +153,10 @@
       map.addLayer({ id: 'campus-3d', type: 'fill-extrusion', source: 'solids', paint: { 'fill-extrusion-color': ['get', 'color'], 'fill-extrusion-height': ['get', 'top'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': 1, 'fill-extrusion-vertical-gradient': true } });
       map.addLayer({ id: 'campus-line', type: 'line', source: 'outlines', paint: { 'line-color': '#3b3b3b', 'line-width': 1 } });
       map.addLayer({ id: 'campus-sel', type: 'line', source: 'outlines', filter: ['==', ['get', 'bid'], -1], paint: { 'line-color': '#146B4E', 'line-width': 3.5 } });
+      map.addSource('draw', { type: 'geojson', data: FC([]) });
+      map.addLayer({ id: 'draw-fill', type: 'fill', source: 'draw', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#146B4E', 'fill-opacity': 0.3 } });
+      map.addLayer({ id: 'draw-line', type: 'line', source: 'draw', filter: ['!=', ['geometry-type'], 'Point'], paint: { 'line-color': '#146B4E', 'line-width': 3, 'line-dasharray': [2, 1] } });
+      map.addLayer({ id: 'draw-pt', type: 'circle', source: 'draw', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#fff', 'circle-stroke-color': '#146B4E', 'circle-stroke-width': 2 } });
       refresh(); applyMode(); fit();
       if (!blds.some(G.isPlaced)) { map.jumpTo({ center: DEFAULT_CENTER, zoom: 16.5 }); }
       if (st.sel) select(st.sel, true);
@@ -161,7 +167,48 @@
     map.on('mousemove', e => { if (!drag) return; const b = cur(); b.longitude = e.lngLat.lng + drag.dx; b.latitude = e.lngLat.lat + drag.dy; mark(); });
     const endDrag = () => { if (drag) { drag = null; map.dragPan.enable(); detail(); } };
     map.on('mouseup', endDrag); map.getCanvas().addEventListener('mouseleave', endDrag);
+    // ---- Gambar gedung baru (2D): klik titik sudut tapak, lalu isi identitas ----
+    const drawInfo = () => {
+      const pts = st.draw || [], c = pts.length >= 3 ? pts.reduce((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length], [0, 0]) : null;
+      const m = pts.length >= 3 ? G.area(pts.map(p => G.fromLngLat(p, c[1], c[0], 0))) : 0;
+      $('#drInfo').textContent = pts.length ? `${pts.length} titik${m ? ' · ±' + fmt.num(Math.round(m)) + ' m²' : ''}` : 'Klik peta untuk menandai sudut gedung';
+      const feats = pts.map(p => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: p } }));
+      if (pts.length >= 3) feats.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[...pts, pts[0]]] } });
+      else if (pts.length === 2) feats.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: pts } });
+      if (map.getSource('draw')) map.getSource('draw').setData(FC(feats));
+      $('#drDone').disabled = pts.length < 3; $('#drUndo').disabled = !pts.length;
+    };
+    function drawMode(on) {
+      if (on && st.dirty && !confirm('Ada perubahan yang belum disimpan. Buang perubahan?')) return;
+      st.draw = on ? [] : null; st.edit = false;
+      $('#drawNew').hidden = on; $('#drawBar').hidden = !on;
+      map.getCanvas().style.cursor = on ? 'crosshair' : '';
+      if (on) { st.mode = '2d'; applyMode(); try { map.doubleClickZoom.disable(); } catch (e) { /* abaikan */ } $('#mnote').innerHTML = 'Mode gambar: klik peta untuk menandai sudut-sudut gedung (minimal 3), lalu tekan <b>Selesai &amp; isi identitas</b>. Gunakan Satelit agar tapak mudah diikuti.'; }
+      else { try { map.doubleClickZoom.enable(); } catch (e) { /* abaikan */ } note(); }
+      drawInfo();
+    }
+    async function drawDone() {
+      const pts = st.draw; if (!pts || pts.length < 3) return UI.err(new Error('Tandai minimal 3 titik sudut gedung'));
+      const lng = pts.reduce((a, p) => a + p[0], 0) / pts.length, lat = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      const local = pts.map(p => G.fromLngLat(p, lat, lng, 0)), land = Math.round(G.area(local) * 100) / 100;
+      if (land < 4) return UI.err(new Error('Gambar terlalu kecil'));
+      UI.formModal({ title: 'Identitas gedung yang digambar', wide: true,
+        fields: BUILDING_FIELDS.map(f => f.name === 'land_area' ? { ...f, help: 'Dihitung otomatis dari gambar di peta; dapat diubah' } : f),
+        values: { floors_count: 1, ownership: 'Milik sendiri', condition: 'baik', land_area: land, latitude: Number(lat.toFixed(7)), longitude: Number(lng.toFixed(7)) },
+        onSubmit: async v => {
+          const b = await API.post('/buildings', { ...v, latitude: lat, longitude: lng, land_area: v.land_area || land });
+          await API.put(`/buildings/${b.id}/map`, { latitude: lat, longitude: lng, map_rotation: 0, map_footprint: local });
+          Ref.clear('buildings'); blds.splice(0, blds.length, ...(await API.get('/map/buildings')).rows);
+          drawMode(false); st.sel = b.id; list(); detail(); refresh(); note(); UI.toast?.(`Gedung ${v.code} dibuat dari gambar (tapak ±${fmt.num(Math.round(land))} m²)`);
+        } });
+    }
+    if (sa) {
+      $('#drawNew').onclick = () => drawMode(true); $('#drCancel').onclick = () => drawMode(false); $('#drDone').onclick = drawDone;
+      $('#drUndo').onclick = () => { st.draw.pop(); drawInfo(); };
+      map.on('dblclick', e => { if (st.draw) { e.preventDefault?.(); if (st.draw.length >= 3) drawDone(); } });
+    }
     map.on('click', e => {
+      if (st.draw) { const p = [e.lngLat.lng, e.lngLat.lat], l = st.draw[st.draw.length - 1]; if (!l || Math.abs(l[0] - p[0]) + Math.abs(l[1] - p[1]) > 1e-8) { st.draw.push(p); drawInfo(); } return; }
       const id = pick(e);
       if (st.edit && cur() && !drag) { if (id !== st.sel) { const b = cur(); b.longitude = e.lngLat.lng; b.latitude = e.lngLat.lat; mark(); detail(); } return; }
       if (id) select(id, false); else if (!st.edit) { /* klik kosong: biarkan pilihan */ }
@@ -174,7 +221,7 @@
     $('#upTo').onchange = e => { st.upTo = Number(e.target.value); refresh(); };
     $('#north').onclick = () => map.easeTo({ bearing: 0, duration: 500 });
     window.addEventListener('beforeunload', e => { if (st.dirty) { e.preventDefault(); e.returnValue = ''; } }, { once: true });
-    list(); detail(); note();
+    list(); detail(); note(); if (sa) drawInfo();
     window.__campus = { map, blds, st };   // untuk pengujian
   });
 })();

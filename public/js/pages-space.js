@@ -107,7 +107,7 @@ route(/^#\/gedung\/(\d+)$/, async (view, [id]) => {
         <dt>Tahun dibangun</dt><dd>${esc(b.year_built || '–')}</dd><dt>Luas bangunan / tanah</dt><dd>${fmt.num(b.building_area)} / ${fmt.num(b.land_area)} m²</dd>
         <dt>Kepemilikan</dt><dd>${esc(b.ownership || '–')}</dd><dt>Kondisi</dt><dd>${esc(b.condition || '–')}</dd><dt>Sertifikat</dt><dd>${esc(b.certificate_no || '–')}</dd>
         <dt>IMB/PBG · SLF</dt><dd>${esc(b.permit_no || '–')} · ${esc(b.slf_no || '–')}</dd><dt>Nilai perolehan</dt><dd>${b.acquisition_value ? fmt.rp(b.acquisition_value) : '–'}</dd>
-        <dt>Koordinat</dt><dd>${b.latitude ? `${b.latitude}, ${b.longitude}` : '–'}</dd><dt>Unit pengelola</dt><dd>${units.map(u => esc(u.unit_name) + (u.room_id ? ' (sebagian ruang)' : '')).join(', ') || '<span class="muted">Belum ditugaskan — atur di menu Unit pengelola</span>'}</dd></dl>
+        <dt>Koordinat</dt><dd>${b.latitude ? `${b.latitude}, ${b.longitude} · <a href="#/peta-kampus?b=${b.id}">lihat di peta</a>` : '– · <a href="#/peta-kampus?b=' + b.id + '">tempatkan di peta</a>'}</dd><dt>Tinggi gedung</dt><dd>${fmt.num(b.floors.filter(f => f.level >= 1).reduce((s, f) => s + Number(f.floor_height || 4), 0))} m</dd><dt>Unit pengelola</dt><dd>${units.map(u => esc(u.unit_name) + (u.room_id ? ' (sebagian ruang)' : '')).join(', ') || '<span class="muted">Belum ditugaskan — atur di menu Unit pengelola</span>'}</dd></dl>
         ${b.description ? `<p style="margin-top:12px">${esc(b.description)}</p>` : ''}</div></div>
       <div class="panel" style="grid-column:1/-1"><div class="panel-head"><h3>Dokumentasi gedung</h3></div><div class="panel-body" id="docs"></div></div>
     </div>`;
@@ -709,10 +709,11 @@ Pages.roomAssets = async (m, r) => {
       <p class="muted" style="margin-bottom:8px">${rows.length} aset · nilai perolehan ${fmt.rp(val)}${bad ? ` · <span class="badge bad">${bad} rusak</span>` : ''}</p>
       ${UI.table({ rows, empty: 'Belum ada aset tetap yang ditempatkan di ruangan ini.', columns: [
         { label: 'Kode / NUP', render: a => `<a href="#/aset/${a.id}" class="mono">${esc(a.tag)}</a>` },
-        { label: 'Nama barang', render: a => `<b>${esc(a.name)}</b>${a.brand || a.model ? `<br><small>${esc([a.brand, a.model].filter(Boolean).join(' '))}</small>` : ''}` },
+        { label: 'Nama barang', render: a => `<a href="#" data-info="${a.id}"><b>${esc(a.name)}</b></a>${a.brand || a.model ? `<br><small>${esc([a.brand, a.model].filter(Boolean).join(' '))}</small>` : ''}` },
         { label: 'Perolehan', render: a => a.acquisition_date ? String(a.acquisition_date).slice(0, 4) : '–' }, { label: 'Nilai', num: true, render: a => fmt.rp(a.price) },
         { label: 'Kondisi', render: a => r.can_manage ? `<select data-cond="${a.id}" style="width:auto;min-width:120px">${UI.options(roomCondOpts, a.condition)}</select>` : badge(a.condition) },
         ...(r.can_manage ? [{ label: '', render: a => `<span class="btn-row" style="flex-wrap:nowrap"><button class="btn sm" data-edit="${a.id}">Ubah</button><button class="btn sm" data-move="${a.id}">Pindah</button><button class="btn sm danger" data-del="${a.id}">Hapus</button></span>` }] : [])] })}`;
+    $$('[data-info]', box).forEach(b => b.onclick = ev => { ev.preventDefault(); Pages.assetInfo(Number(b.dataset.info), draw); });
     $$('[data-edit]', box).forEach(b => b.onclick = async () => { const a = rows.find(x => x.id === Number(b.dataset.edit));
       UI.formModal({ title: `Ubah data ${a.tag}`, wide: true, fields: await assetFields(true), values: a, onSubmit: async v => { await API.put('/assets/' + a.id, v); UI.toast('Data aset diperbarui'); draw(); } }); });
     $$('[data-move]', box).forEach(b => b.onclick = async () => { const a = rows.find(x => x.id === Number(b.dataset.move)), rooms = await Ref.get('rooms');
@@ -780,4 +781,29 @@ Pages.roomKir = (r, rows) => {
       <div>Bogor, ……………………………<br>Penanggung jawab ruangan<div class="sp"></div><b>(……………………………)</b></div></div>
     <script>setTimeout(()=>print(),500)<\/script></body></html>`);
   w.document.close();
+};
+
+// Detail aset dari daftar aset ruang: posisi & kondisi sekarang, QR label, riwayat mutasi dan perbaikan
+Pages.assetInfo = async (id, onChange) => {
+  let a; try { a = await API.get('/assets/' + id); } catch (e) { return UI.err(e); }
+  const rm = a.history.filter(h => ['registrasi', 'mutasi'].includes(h.action)), cd = a.history.filter(h => h.action === 'kondisi');
+  const scan = `${location.origin}${API.base || ''}/a.html?t=${encodeURIComponent(a.tag)}`;
+  const m = UI.modal({ title: `${a.name}`, wide: true, body: `
+    <div class="asset-head"><div><div class="asset-tag">${esc(a.tag)}</div>
+      <p class="muted">${a.code_path.map(c => esc(c.name)).join(' › ')}</p>
+      <div class="btn-row" style="margin:8px 0">${badge(a.condition, COND)} ${badge(a.status)} <span class="muted">NUP ${a.nup}</span></div>
+      <dl class="kv"><dt>Posisi saat ini</dt><dd><b>${a.room_code ? `${esc(a.room_code)} — ${esc(a.room_name)}` : '–'}</b>${a.building_name ? `<br><small>${esc(a.building_name)}</small>` : ''}</dd>
+        <dt>Pemegang</dt><dd>${esc(a.holder_name || '–')}</dd><dt>Merek / tipe</dt><dd>${esc([a.brand, a.model].filter(Boolean).join(' / ') || '–')}</dd>
+        <dt>Perolehan</dt><dd>${fmt.date(a.acquisition_date)} · ${fmt.rp(a.price)}</dd><dt>Nilai buku</dt><dd>${fmt.rp(a.book_value)}</dd></dl></div>
+      <div style="text-align:center"><img class="qr" src="${API.url('/assets/' + a.id + '/qr.svg')}" alt="QR ${esc(a.tag)}"><br><small class="muted">Pindai dengan kamera/pemindai QR biasa untuk melihat posisi &amp; kondisi terkini</small></div></div>
+    <h4 style="margin:16px 0 6px">Riwayat mutasi / penempatan</h4>
+    ${UI.table({ rows: rm, empty: 'Belum ada mutasi.', columns: [{ label: 'Tanggal', render: h => fmt.dt(h.created_at) }, { label: 'Kegiatan', render: h => HIST[h.action] || h.action }, { label: 'Dari', render: h => esc(h.from_room || '–') }, { label: 'Ke', render: h => esc(h.to_room || '–') }, { label: 'Oleh', render: h => esc(h.user_name || 'sistem') }, { label: 'Catatan', render: h => esc(h.note || '') }] })}
+    <h4 style="margin:16px 0 6px">Riwayat perbaikan</h4>
+    ${UI.table({ rows: a.maintenance, empty: 'Belum pernah diperbaiki.', columns: [{ label: 'Mulai', render: x => fmt.date(x.start_date) }, { label: 'Uraian', key: 'description' }, { label: 'Penyedia', key: 'vendor' }, { label: 'Biaya', num: true, render: x => fmt.rp(x.cost) }, { label: 'Status', render: x => badge(x.status) }] })}
+    <h4 style="margin:16px 0 6px">Riwayat kondisi</h4>
+    ${UI.table({ rows: cd, empty: 'Belum ada perubahan kondisi.', columns: [{ label: 'Tanggal', render: h => fmt.dt(h.created_at) }, { label: 'Perubahan', render: h => `${esc((COND[h.from_condition] || ['–'])[0])} → ${esc((COND[h.to_condition] || ['–'])[0])}` }, { label: 'Catatan', render: h => esc(h.note || '') }] })}
+    <div class="btn-row" style="margin-top:14px"><a class="btn sm" href="#/aset/${a.id}" id="aiFull">Kartu lengkap</a>${a.can_manage ? `<button class="btn sm" id="aiMnt">${I('wrench')} Catat perbaikan</button>` : ''}<button class="btn sm" id="aiLbl">${I('qr')} Cetak label QR</button><a class="btn sm" href="${esc(scan)}" target="_blank" rel="noopener">Buka halaman pindai</a></div>`, onClose: () => onChange && onChange() });
+  $('#aiFull', m.el).onclick = () => m.close();
+  $('#aiLbl', m.el).onclick = () => { sessionStorage.setItem('sp_labels', JSON.stringify([a.id])); m.close(); location.hash = '#/label'; };
+  const mn = $('#aiMnt', m.el); if (mn) mn.onclick = () => { m.close(); location.hash = '#/aset/' + a.id; };
 };

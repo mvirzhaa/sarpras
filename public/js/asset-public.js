@@ -18,8 +18,9 @@
     m.innerHTML = `<div class="step"><div class="asset-tag">${esc(a.tag)}</div><h1 style="font-size:24px;margin:6px 0 4px">${esc(a.name)}</h1><p class="muted">${esc(a.code_name)}${a.brand ? ' · ' + esc(a.brand) : ''}${a.model ? ' ' + esc(a.model) : ''}</p>
       ${a.status === 'dihapus' ? '<p class="badge bad">Aset ini sudah dihapuskan</p>' : ''}
       <dl class="kv" style="margin-top:14px"><dt>Kondisi</dt><dd><b>${COND[a.condition] || a.condition}</b></dd><dt>Diperoleh</dt><dd>${d(a.acquisition_date)}</dd>
-        <dt>Penempatan</dt><dd>${a.room_code ? `${esc(a.room_code)} — ${esc(a.room_name)}<br><small>${esc(a.building_name)}</small>` : '–'}</dd>
+        <dt>Posisi saat ini</dt><dd>${a.room_code ? `<b>${esc(a.room_code)} — ${esc(a.room_name)}</b><br><small>${esc([a.floor_name, a.building_name].filter(Boolean).join(' · '))}</small>` : '–'}</dd><dt>Kondisi diperbarui</dt><dd>${d(a.condition_at || a.placed_at)}</dd>
         <dt>Ditempatkan sejak</dt><dd>${d(a.placed_at)}</dd><dt>Pemegang</dt><dd>${esc(a.holder_name || '–')}</dd><dt>Unit pengelola</dt><dd>${esc(a.unit_name || '–')}</dd></dl>
+      ${(a.recent || []).length ? `<h3 style="margin:18px 0 6px;font-size:15px">Jejak terakhir</h3><ul class="timeline">${a.recent.map(h => `<li><time>${d(h.created_at)}</time><div><b>${{ mutasi: 'Pindah ruang', registrasi: 'Terdaftar', kondisi: 'Perubahan kondisi', perbaikan: 'Perbaikan' }[h.action]}</b>${h.from_room || h.to_room ? ` ${esc(h.from_room || '–')} → ${esc(h.to_room || '–')}` : ''}${h.from_condition || h.to_condition ? ` ${COND[h.from_condition] || '–'} → ${COND[h.to_condition] || '–'}` : ''}</div></li>`).join('')}</ul>` : ''}
       <div class="btn-row" style="margin-top:18px">${token ? `<a class="btn primary" href="${BASE_PATH}/#/aset/${a.id}">Buka kartu inventaris</a>` : `<a class="btn" href="${BASE_PATH || './'}">Masuk sebagai pengelola</a>`}
       ${a.room_code ? `<a class="btn" href="${BASE_PATH}/portal.html">Laporkan kerusakan</a>` : ''}</div></div>`;
   } catch (e) { m.innerHTML = `<div class="step"><h2>Aset tidak ditemukan</h2><p class="muted">${esc(e.message)}</p></div>`; }

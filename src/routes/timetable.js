@@ -23,12 +23,27 @@ const CAUSES = [['ruang', 'Bentrok ruang'], ['dosen', 'Bentrok dosen'], ['rombel
 const toMin = x => { const [a, b] = String(x).split(':').map(Number); return a * 60 + b; };
 const overlap = (a, b) => a.day === Number(b.dow ?? b.day) && toMin(a.start_time) < toMin(b.et ?? b.end_time) && toMin(b.st ?? b.start_time) < toMin(a.end_time);
 const descA = a => `${a.course_code} ${a.course_name} (${a.class_name}${a.group ? ' · ' + a.group : ''})`;
+// Hasil proses lain yang SUDAH SELESAI tetapi belum diterbitkan (rombel/prodi lain) juga dianggap memakai ruang & jam: hasil terbaru tiap (unit, prodi, rombel);
+// kelas yang sedang dijadwalkan proses ini dikecualikan. Dipakai agar rombel/prodi berikutnya tidak bentrok dengan yang sebelumnya.
+async function pendingEvents(periodId, runId, ownClassIds, roomIds, lecIds) {
+  const runs = await db.q(`SELECT DISTINCT ON (unit_id, sub_unit_id, student_group) id, result FROM timetable_runs
+    WHERE period_id=$1 AND status='done' AND ($2::int IS NULL OR id<>$2) ORDER BY unit_id, sub_unit_id, student_group, created_at DESC, id DESC`, [periodId, runId ?? null]);
+  const own = new Set((ownClassIds || []).map(Number)), out = [];
+  for (const r of runs) for (const a of ((r.result && r.result.assignments) || [])) {
+    if (own.has(Number(a.class_id)) || !a.room_id) continue;
+    if (!roomIds.includes(a.room_id) && !(a.lecturer_id && lecIds.includes(a.lecturer_id))) continue;
+    out.push({ id: null, title: `${a.course_code} ${a.course_name} (${a.class_name}${a.group ? ' · ' + a.group : ''}) — hasil proses #${r.id}, belum terbit`, room_id: a.room_id, lecturer_id: a.lecturer_id ?? null, room_code: a.room_code, dow: Number(a.day), st: a.start_time, et: a.end_time });
+  }
+  return out;
+}
 async function externalEvents(run, period, assignments, only) {
   const roomIds = [...new Set((only ? only.rooms : assignments.map(a => a.room_id)).filter(Boolean))], lecIds = [...new Set((only ? only.lecs : assignments.map(a => a.lecturer_id)).filter(Boolean))];
   if (!roomIds.length && !lecIds.length) return [];
-  return db.q(`SELECT e.id, e.title, e.room_id, e.lecturer_id, rm.code room_code, extract(isodow FROM e.start_at)::int dow, to_char(e.start_at,'HH24:MI') st, to_char(e.end_at,'HH24:MI') et
+  const ownIds = [...(run.result && run.result.assignments || []), ...(assignments || [])].map(a => a.class_id);
+  const pend = await pendingEvents(run.period_id, run.id, ownIds, roomIds, lecIds);
+  return pend.concat(await db.q(`SELECT e.id, e.title, e.room_id, e.lecturer_id, rm.code room_code, extract(isodow FROM e.start_at)::int dow, to_char(e.start_at,'HH24:MI') st, to_char(e.end_at,'HH24:MI') et
     FROM events e JOIN rooms rm ON rm.id=e.room_id WHERE e.status='confirmed' AND (e.room_id = ANY($1) OR e.lecturer_id = ANY($8)) AND e.start_at < $3::date + 1 AND e.end_at > $2::date AND ${KEEP_SQL}
-    GROUP BY e.id, rm.code`, [roomIds, period.start_date, period.end_date, run.period_id, run.sub_unit_id ?? null, run.unit_id, run.student_group ?? null, lecIds]);
+    GROUP BY e.id, rm.code`, [roomIds, period.start_date, period.end_date, run.period_id, run.sub_unit_id ?? null, run.unit_id, run.student_group ?? null, lecIds]));
 }
 // Daftar bentrok keras per penyebab: satu baris per (penyebab, mata kuliah)
 function analyze(A, ext) {
@@ -235,6 +250,9 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const ev = await db.q(`SELECT DISTINCT e.room_id, extract(isodow FROM e.start_at)::int dow, to_char(e.start_at,'HH24:MI') st, to_char(e.end_at,'HH24:MI') et
     FROM events e WHERE e.status='confirmed' AND e.room_id = ANY($1) AND e.start_at < $3::date + 1 AND e.end_at > $2::date AND ${keep}`,
   [rooms.map(x => x.id), period.start_date, period.end_date, period_id, sub, unit_id, grp]);
+  const ownIds = classes.map(c => c.id), roomIdList = rooms.map(x => x.id), lecIdList = [...new Set(classes.map(c => c.lecturer_id).filter(Boolean))];
+  const pend = await pendingEvents(period_id, null, ownIds, roomIdList, lecIdList);
+  ev.push(...pend.filter(e => roomIdList.includes(e.room_id)));
   const blocked = [];
   for (const e of ev) slots.forEach((s, i) => { if (s.start_time < e.et && s.end_time > e.st) blocked.push({ room_id: e.room_id, day: e.dow, slot_index: i }); });
   // Dosen yang sudah mengajar di jadwal lain (mis. prodi lain / unit lain) tidak boleh dijadwalkan bersamaan
@@ -242,6 +260,7 @@ r.post('/tt/runs', roles('superadmin', 'unit_admin'), ah(async (req, res) => {
   const lecEv = lecIds.length ? await db.q(`SELECT DISTINCT e.lecturer_id, extract(isodow FROM e.start_at)::int dow, to_char(e.start_at,'HH24:MI') st, to_char(e.end_at,'HH24:MI') et
     FROM events e WHERE e.status='confirmed' AND e.lecturer_id = ANY($1) AND e.start_at < $3::date + 1 AND e.end_at > $2::date AND ${keep}`,
   [lecIds, period.start_date, period.end_date, period_id, sub, unit_id, grp]) : [];
+  lecEv.push(...pend.filter(e => e.lecturer_id && lecIdList.includes(e.lecturer_id)));
   const lecBlocked = [];
   for (const e of lecEv) slots.forEach((s, i) => { if (s.start_time < e.et && s.end_time > e.st) lecBlocked.push({ lecturer_id: e.lecturer_id, day: e.dow, slot_index: i }); });
 
@@ -376,7 +395,9 @@ r.post('/tt/runs/:id/publish', roles('superadmin', 'unit_admin'), ah(async (req,
   const run = await db.one('SELECT * FROM timetable_runs WHERE id=$1', [req.params.id]);
   if (!run || !['done', 'published'].includes(run.status)) fail(409, 'Proses belum selesai');
   unitGuard(req.user, run.unit_id, run.sub_unit_id);
-  if (run.hard_violations > 0 && !req.body.force) fail(409, `Masih ada ${run.hard_violations} bentrok. Perbaiki atau publikasikan paksa.`);
+  // hitung ulang bentrok terhadap jadwal terbit & hasil rombel/prodi lain saat ini (data bisa berubah sejak proses dijalankan)
+  const fresh = run.result && run.result.assignments ? (await runConflicts(run)).length : run.hard_violations;
+  if (fresh > 0 && !req.body.force) fail(409, `Masih ada ${fresh} bentrok (termasuk dengan rombel/prodi lain). Perbaiki atau publikasikan paksa.`);
   const period = await db.one('SELECT * FROM academic_periods WHERE id=$1', [run.period_id]);
   const from = req.body.start_date || period.start_date, to = req.body.end_date || period.end_date;
   const skip = (req.body.skip_dates || []).filter(Boolean);

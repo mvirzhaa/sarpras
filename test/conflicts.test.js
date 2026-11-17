@@ -18,4 +18,21 @@ ok('ruang dipakai kegiatan lain: MK5', JSON.stringify(by('ruang_luar')) === '[5]
 ok('dosen di jadwal lain: MK5 (hanya yang bertumpuk)', JSON.stringify(by('dosen_luar')) === '[5]');
 ok('urut per penyebab', rows.map(r => CAUSES.findIndex(c => c[0] === r.cause)).every((v, i, arr) => !i || arr[i - 1] <= v));
 ok('baris bersih tidak muncul', !analyze([A[4]], []).length);
-console.log(`semua ${n} uji bentrok lulus`);
+// Hasil proses lain yang belum terbit ikut memblokir ruang/dosen (kelas yang sedang dijadwalkan dikecualikan)
+{
+  const i = src.indexOf('async function pendingEvents'), j = src.indexOf('async function externalEvents');
+  const fakeRuns = [{ id: 7, result: { assignments: [
+    { class_id: 10, course_code: 'PAI1', course_name: 'A', class_name: 'A', group: 'PAI-2A', room_id: 1, lecturer_id: 5, room_code: 'R1', day: 1, start_time: '07:00', end_time: '08:25' },
+    { class_id: 11, course_code: 'PAI2', course_name: 'B', class_name: 'A', group: 'PAI-2A', room_id: 2, lecturer_id: 6, room_code: 'R2', day: 2, start_time: '07:00', end_time: '08:25' },
+    { class_id: 12, course_code: 'PAI3', course_name: 'C', class_name: 'A', group: 'PAI-2A', room_id: 9, lecturer_id: 9, room_code: 'R9', day: 3, start_time: '07:00', end_time: '08:25' }] } }];
+  const db = { q: async () => fakeRuns };
+  const pe = new Function('db', src.slice(i, j) + '\nreturn pendingEvents;')(db);
+  pe(1, null, [11], [1, 2], [5]).then(ev => {
+    ok('rombel A (belum terbit) memblokir ruang R1 & dosen 5 untuk rombel B', ev.length === 1 && ev[0].room_id === 1 && ev[0].dow === 1 && ev[0].title.includes('belum terbit'));
+    ok('kelas milik proses sendiri dikecualikan; ruang/dosen tak terkait diabaikan', !ev.some(e => e.room_id === 2 || e.room_id === 9));
+    const rows2 = analyze([mk({ id: 20, g: 'PAI-2B', l: 5, d: 1, s: '07:00', e: '08:25', r: 1 })], ev);
+    ok('analisis: rombel B bentrok ruang & dosen dengan rombel A', rows2.some(r => r.cause === 'ruang_luar') && rows2.some(r => r.cause === 'dosen_luar'));
+    console.log(`semua ${n} uji bentrok lulus`);
+  });
+}
+if (false) console.log(`semua ${n} uji bentrok lulus`);

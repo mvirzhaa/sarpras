@@ -66,11 +66,16 @@ pub.get('/feedback/:ticket', ah(async (req, res) => {
 // Hasil scan QR aset (informasi yang aman untuk publik)
 pub.get('/assets/:tag', ah(async (req, res) => {
   const a = await db.one(`SELECT a.id, a.tag, a.name, a.brand, a.model, a.condition, a.status, a.acquisition_date, ac.name code_name,
-      r.code room_code, r.name room_name, b.name building_name, u.name unit_name, p.name holder_name,
+      r.code room_code, r.name room_name, f.name floor_name, b.name building_name, u.name unit_name, p.name holder_name,
+      (SELECT max(created_at) FROM asset_history h WHERE h.asset_id=a.id AND h.action='kondisi') condition_at,
       (SELECT max(created_at) FROM asset_history h WHERE h.asset_id=a.id AND h.action IN ('mutasi','registrasi')) placed_at
-    FROM assets a JOIN asset_codes ac ON ac.id=a.asset_code_id LEFT JOIN rooms r ON r.id=a.room_id LEFT JOIN buildings b ON b.id=r.building_id
+    FROM assets a JOIN asset_codes ac ON ac.id=a.asset_code_id LEFT JOIN rooms r ON r.id=a.room_id LEFT JOIN floors f ON f.id=r.floor_id LEFT JOIN buildings b ON b.id=r.building_id
     LEFT JOIN units u ON u.id=a.unit_id LEFT JOIN people p ON p.id=a.holder_id WHERE a.tag=$1`, [req.params.tag]);
   if (!a) fail(404, 'Aset tidak ditemukan');
+  // jejak singkat (tanpa nama pengguna) untuk pemindai publik
+  a.recent = await db.q(`SELECT h.action, h.created_at, fr.code from_room, tr.code to_room, h.from_condition, h.to_condition
+    FROM asset_history h LEFT JOIN rooms fr ON fr.id=h.from_room_id LEFT JOIN rooms tr ON tr.id=h.to_room_id
+    WHERE h.asset_id=$1 AND h.action IN ('mutasi','registrasi','kondisi','perbaikan') ORDER BY h.created_at DESC, h.id DESC LIMIT 6`, [a.id]);
   res.json(a);
 }));
 

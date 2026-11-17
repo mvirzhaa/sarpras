@@ -16,6 +16,7 @@ const srv = http.createServer((req, res) => {
       if (u.pathname === '/api/map/buildings') return json(res, { rows: B });
       if (u.pathname === '/api/buildings' && req.method === 'GET') return json(res, { rows: B.map(x => ({ ...x, floor_total: x.floors.length, room_total: 0 })) });
       if (/^\/api\/buildings\/1$/.test(u.pathname)) return json(res, { ...B[0], assignments: [], stats: { assets: 0, value: 0 }, floors: B[0].floors });
+      if (u.pathname === '/api/buildings' && req.method === 'POST') return json(res, { id: 3, ...b }, 201);
       if (/\/map$/.test(u.pathname) && req.method === 'PUT') return json(res, { ...B[0], ...b });
       if (u.pathname.startsWith('/api/floors/') && req.method === 'PUT') return json(res, {});
       return json(res, { rows: [] });
@@ -65,6 +66,20 @@ const FAKE = `(() => { const reg = {};
   await pg.click('#eSave'); await pg.waitForTimeout(150);
   const put = calls.find(c => c[0] === 'PUT' && c[1] === '/api/buildings/2/map');
   ok('PUT /buildings/2/map berisi posisi, rotasi 90, warna', put && put[2].latitude === -6.57 && put[2].longitude === 106.79 && put[2].map_rotation === 90 && put[2].wall_color === '#336699' && put[2].roof_color === null && put[2].map_footprint.length === 4, put);
+  // Gambar gedung baru di peta 2D
+  await pg.click('#drawNew');
+  ok('mode gambar -> 2D', await pg.evaluate(() => window.__fake.pitch === 0));
+  const clickAt = (lng, lat) => pg.evaluate(([a, b]) => (window.__fake.h.click || []).forEach(f => f({ lngLat: { lng: a, lat: b }, point: {} })), [lng, lat]);
+  await clickAt(106.7800, -6.5600); await clickAt(106.7804, -6.5600); await clickAt(106.7804, -6.5603); await clickAt(106.7800, -6.5603);
+  const dn = await pg.evaluate(() => window.__fake.src.draw.data.features.length);
+  ok('titik & poligon pratinjau tergambar', dn === 5, dn);
+  await pg.click('#drDone'); await pg.waitForSelector('[name=code]');
+  const land = Number(await pg.inputValue('[name=land_area]'));
+  ok('luas tanah otomatis ~ 44 x 33 m (±1450 m²)', land > 1300 && land < 1600, land);
+  await pg.fill('[name=code]', 'GBR'); await pg.fill('[name=name]', 'Gedung Gambar'); await pg.locator('.modal-foot .primary').click(); await pg.waitForTimeout(300);
+  const pb = calls.find(c => c[0] === 'POST' && c[1] === '/api/buildings'), pm = calls.find(c => c[0] === 'PUT' && c[1] === '/api/buildings/3/map');
+  ok('POST gedung membawa identitas & luas tanah', pb && pb[2].code === 'GBR' && pb[2].land_area === land, pb);
+  ok('PUT tapak: 4 titik, posisi di tengah gambar', pm && pm[2].map_footprint.length === 4 && Math.abs(pm[2].longitude - 106.7802) < 1e-6 && Math.abs(pm[2].latitude + 6.56015) < 1e-6, pm);
   // Halaman gedung: tinggi lantai bawaan 4 dan dapat diubah
   await pg.goto(url + '/#/gedung/1'); await pg.waitForSelector('[data-editfloor]');
   ok('tabel lantai menampilkan tinggi 5 m untuk lantai 3', (await pg.locator('table.t').first().innerText()).includes('5 m'));
